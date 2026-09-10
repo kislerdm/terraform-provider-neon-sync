@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
@@ -58,9 +58,9 @@ resource "neon_jwks_url" "_" {
 		config := resourceDefinition(projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -126,9 +126,9 @@ resource "neon_jwks_url" "_" {
 
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -145,9 +145,9 @@ resource "neon_jwks_url" "_" {
 		config := resourceDefinition(projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{

@@ -47,7 +47,6 @@ var p = &schema.Provider{
 		"neon_role":                     resourceRole(),
 		"neon_database":                 resourceDatabase(),
 		"neon_project_permission":       resourceProjectPermission(),
-		"neon_jwks_url":                 resourceJwksUrl(),
 		"neon_vpc_endpoint_assignment":  resourceVPCEndpointAssignment(),
 		"neon_vpc_endpoint_restriction": resourceVPCEndpointRestriction(),
 	},
@@ -154,6 +153,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 	return []func() resource.Resource{
 		NewAPIKeyResource,
 		NewOrgAPIKeyResource,
+		NewJWKSURLResource,
 		NewBranchBackupScheduleResource,
 	}
 }

@@ -2,196 +2,244 @@ package provider
 
 import (
 	"context"
-	"errors"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-func resourceJwksUrl() *schema.Resource {
-	return &schema.Resource{
-		Description: `Project JWKS URL. See details: https://neon.com/docs/data-api/custom-authentication-providers
+var _ resource.Resource = (*jwksURLResource)(nil)
+var _ resource.ResourceWithConfigure = (*jwksURLResource)(nil)
 
-~>**WARNING** The resource does not support import.
-`,
-		Importer: &schema.ResourceImporter{
-			StateContext: resourceJwksUrlImport,
+type jwksURLResource struct {
+	client *neonClient
+}
+
+type jwksURLResourceModel struct {
+	ID           types.String `tfsdk:"id"`
+	ProjectID    types.String `tfsdk:"project_id"`
+	JWKSURL      types.String `tfsdk:"jwks_url"`
+	ProviderName types.String `tfsdk:"provider_name"`
+	RoleNames    []string     `tfsdk:"role_names"`
+	BranchID     types.String `tfsdk:"branch_id"`
+	JWTAudience  types.String `tfsdk:"jwt_audience"`
+}
+
+func NewJWKSURLResource() resource.Resource {
+	return &jwksURLResource{}
+}
+
+func (r *jwksURLResource) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "neon_jwks_url"
+}
+
+func (r *jwksURLResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+	resp.Schema = schema.Schema{
+		Description: "Project JWKS URL. See details: https://neon.com/docs/data-api/custom-authentication-providers\n\n~>**WARNING** The resource does not support import.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The JWKS configuration ID.",
+			},
+			"project_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "Project ID.",
+			},
+			"jwks_url": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The URL that lists the JWKS.",
+			},
+			"provider_name": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The name of the authentication provider.",
+			},
+			"role_names": schema.ListAttribute{
+				ElementType:   types.StringType,
+				Required:      true,
+				PlanModifiers: []planmodifier.List{listRequiresReplace{}},
+				Description:   "The roles the JWKS should be mapped to.",
+			},
+			"branch_id": schema.StringAttribute{
+				Optional:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "Branch ID.",
+			},
+			"jwt_audience": schema.StringAttribute{
+				Optional:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The name of the required JWT Audience to be used.",
+			},
 		},
-		CreateContext: resourceJwksUrlCreateRetry,
-		ReadContext:   resourceJwksUrlReadRetry,
-		DeleteContext: resourceJwksUrlDeleteRetry,
-		Schema: map[string]*schema.Schema{
-			"project_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Project ID.",
-			},
-			"jwks_url": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The URL that lists the JWKS.",
-			},
-			"provider_name": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The name of the authentication provider.",
-			},
-			"role_names": {
-				Type:        schema.TypeList,
-				MinItems:    1,
-				MaxItems:    10,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The roles the JWKS should be mapped to.",
-				Elem:        &schema.Schema{Type: schema.TypeString},
-			},
-			"branch_id": {
-				Type:        schema.TypeString,
-				ForceNew:    true,
-				Optional:    true,
-				Description: "Branch ID.",
-			},
-			"jwt_audience": {
-				Type:        schema.TypeString,
-				ForceNew:    true,
-				Optional:    true,
-				Description: "The name of the required JWT Audience to be used.",
-			},
-		},
 	}
 }
 
-func updateStateJwksUrl(d *schema.ResourceData, v neon.JWKS, roleNames []string) error {
-	if err := d.Set("project_id", v.ProjectID); err != nil {
-		return err
-	}
-	if err := d.Set("jwks_url", v.JwksURL); err != nil {
-		return err
-	}
-	if err := d.Set("provider_name", v.ProviderName); err != nil {
-		return err
-	}
-	if roleNames != nil {
-		if err := d.Set("role_names", roleNames); err != nil {
-			return err
-		}
-	}
-	if v.BranchID != nil {
-		if err := d.Set("branch_id", *v.BranchID); err != nil {
-			return err
-		}
-	}
-	if v.JwtAudience != nil {
-		if err := d.Set("jwt_audience", *v.JwtAudience); err != nil {
-			return err
-		}
-	}
-	return nil
+type listRequiresReplace struct{}
+
+func (listRequiresReplace) Description(context.Context) string {
+	return "requires replacement when the list changes"
 }
 
-func resourceJwksUrlCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "create JWKS URL")
-	cfg := neon.AddProjectJWKSRequest{
-		JwksURL:      d.Get("jwks_url").(string),
-		ProviderName: d.Get("provider_name").(string),
-	}
-	// The length condition is an overhead because tf type system will verify that the slice contains at least 1 element
-	// I decided to keep it as additional gateway in case the API interface changes.
-	if v, ok := d.GetOk("role_names"); ok && len(v.([]interface{})) > 0 {
-		vv := v.([]interface{})
-		var roleNames = make([]string, len(vv))
-		for i, roleName := range vv {
-			roleNames[i] = roleName.(string)
-		}
-		cfg.RoleNames = roleNames
-	}
-	if v, ok := d.GetOk("branch_id"); ok && v.(string) != "" {
-		cfg.BranchID = pointer(v.(string))
-	}
-	if v, ok := d.GetOk("jwt_audience"); ok && v.(string) != "" {
-		cfg.JwtAudience = pointer(v.(string))
-	}
-
-	tflog.Debug(ctx, "create JWKS URL", map[string]interface{}{"cfg": cfg})
-
-	client := meta.(*neon.Client)
-	resp, err := client.AddProjectJWKS(d.Get("project_id").(string), cfg)
-	if err == nil {
-		waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
-		err = updateStateJwksUrl(d, resp.JWKSResponse.Jwks, cfg.RoleNames)
-	}
-	if err == nil {
-		d.SetId(resp.Jwks.ID)
-		tflog.Trace(ctx, "successfully created JWKS URL")
-	}
-	return err
+func (listRequiresReplace) MarkdownDescription(ctx context.Context) string {
+	return listRequiresReplace{}.Description(ctx)
 }
 
-func resourceJwksUrlRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	var err error
-	tflog.Trace(ctx, "read JWKS URL", map[string]interface{}{"id": d.Id()})
-	projectID, ok := d.Get("project_id").(string)
+func (listRequiresReplace) PlanModifyList(_ context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	if req.StateValue.IsNull() || req.PlanValue.IsNull() || req.StateValue.IsUnknown() || req.PlanValue.IsUnknown() {
+		return
+	}
+	resp.RequiresReplace = true
+}
+
+func (r *jwksURLResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*neonClient)
 	if !ok {
-		err = errors.New("project_id is not a string")
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			"Expected *neonClient, got an unexpected type.",
+		)
+		return
 	}
 
-	var resp neon.ProjectJWKSResponse
-	if err == nil {
-		resp, err = meta.(*neon.Client).GetProjectJWKS(projectID)
+	r.client = client
+}
+
+func (r *jwksURLResource) ImportState(_ context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.AddError(
+		"Import Not Supported",
+		"the resource does not support import, please recreate it instead",
+	)
+}
+
+func (r *jwksURLResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
-	if err == nil {
-		var jwks neon.JWKS
-		for _, el := range resp.Jwks {
-			if d.Id() == el.ID {
-				jwks = el
-				break
-			}
+
+	var state jwksURLResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cfg := neon.AddProjectJWKSRequest{
+		JwksURL:      state.JWKSURL.ValueString(),
+		ProviderName: state.ProviderName.ValueString(),
+		RoleNames:    state.RoleNames,
+	}
+	if !state.BranchID.IsNull() && !state.BranchID.IsUnknown() && state.BranchID.ValueString() != "" {
+		cfg.BranchID = pointer(state.BranchID.ValueString())
+	}
+	if !state.JWTAudience.IsNull() && !state.JWTAudience.IsUnknown() && state.JWTAudience.ValueString() != "" {
+		cfg.JwtAudience = pointer(state.JWTAudience.ValueString())
+	}
+
+	var result neon.JWKSCreationOperation
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+		var err error
+		result, err = r.client.sdk.AddProjectJWKS(state.ProjectID.ValueString(), cfg)
+		if err == nil {
+			waitUnfinishedOperations(ctx, r.client.sdk, result.OperationsResponse.Operations)
 		}
-		if jwks.ID == "" {
-			tflog.Debug(ctx, "JWKS not found, removing from state", map[string]interface{}{
-				"id":         d.Id(),
-				"project_id": projectID,
-			})
-			d.SetId("")
-		} else {
-			err = updateStateJwksUrl(d, jwks, nil)
+		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	state.ID = types.StringValue(result.Jwks.ID)
+	setJWKSModel(&state, result.JWKSResponse.Jwks, cfg.RoleNames)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *jwksURLResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var state jwksURLResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var result neon.ProjectJWKSResponse
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		var err error
+		result, err = r.client.sdk.GetProjectJWKS(state.ProjectID.ValueString())
+		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	for _, jwks := range result.Jwks {
+		if jwks.ID == state.ID.ValueString() {
+			setJWKSModel(&state, jwks, nil)
+			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+			return
 		}
 	}
-	tflog.Trace(ctx, "successfully read JWKS URL", map[string]interface{}{"id": d.Id()})
-	return err
+
+	tflog.Debug(ctx, "JWKS not found, removing from state", map[string]any{
+		"id":         state.ID.ValueString(),
+		"project_id": state.ProjectID.ValueString(),
+	})
+	resp.State.RemoveResource(ctx)
 }
 
-func resourceJwksUrlDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "delete JWKS URL", map[string]interface{}{"id": d.Id()})
-	client := meta.(*neon.Client)
-	resp, err := client.DeleteProjectJWKS(d.Get("project_id").(string), d.Id())
-	if err == nil {
-		err = updateStateJwksUrl(d, resp, nil)
+func (r *jwksURLResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
+	resp.Diagnostics.AddError("JWKS URL Update Not Supported", "Changing the JWKS URL attributes requires replacing the resource.")
+}
+
+func (r *jwksURLResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
-	if err == nil {
-		d.SetId(resp.ID)
+
+	var state jwksURLResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	tflog.Trace(ctx, "successfully deleted JWKS URL", map[string]interface{}{"id": d.Id()})
-	return err
+
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		_, err := r.client.sdk.DeleteProjectJWKS(state.ProjectID.ValueString(), state.ID.ValueString())
+		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.State.RemoveResource(ctx)
 }
 
-func resourceJwksUrlCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceJwksUrlCreate, ctx, d, meta)
-}
-
-func resourceJwksUrlReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceJwksUrlRead, ctx, d, meta)
-}
-
-func resourceJwksUrlDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceJwksUrlDelete, ctx, d, meta)
-}
-
-func resourceJwksUrlImport(_ context.Context, _ *schema.ResourceData, _ interface{}) ([]*schema.ResourceData, error) {
-	return nil, errors.New("the resource does not support import, please recreate it instead")
+func setJWKSModel(model *jwksURLResourceModel, value neon.JWKS, roleNames []string) {
+	model.ID = types.StringValue(value.ID)
+	model.ProjectID = types.StringValue(value.ProjectID)
+	model.JWKSURL = types.StringValue(value.JwksURL)
+	model.ProviderName = types.StringValue(value.ProviderName)
+	if roleNames != nil {
+		model.RoleNames = roleNames
+	}
+	if value.BranchID != nil {
+		model.BranchID = types.StringValue(*value.BranchID)
+	}
+	if value.JwtAudience != nil {
+		model.JWTAudience = types.StringValue(*value.JwtAudience)
+	}
 }
