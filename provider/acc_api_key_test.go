@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
@@ -63,9 +63,9 @@ func TestRecreateAPIKeyIfNotFound(t *testing.T) {
 		keyName := "test" + uuid.NewString()
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -94,9 +94,9 @@ func TestRecreateAPIKeyIfNotFound(t *testing.T) {
 		config := fmt.Sprintf(`resource "neon_api_key" "this" {name = "%s"}`, keyName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{

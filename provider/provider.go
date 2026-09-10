@@ -41,7 +41,6 @@ var p = &schema.Provider{
 		},
 	},
 	ResourcesMap: map[string]*schema.Resource{
-		"neon_api_key":                  resourceAPIKey(),
 		"neon_project":                  resourceProject(),
 		"neon_branch":                   resourceBranch(),
 		"neon_endpoint":                 resourceEndpoint(),
@@ -154,6 +153,7 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		NewAPIKeyResource,
 		NewBranchBackupScheduleResource,
 	}
 }
