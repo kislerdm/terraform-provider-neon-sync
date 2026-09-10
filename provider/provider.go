@@ -50,7 +50,6 @@ var p = &schema.Provider{
 		"neon_jwks_url":                 resourceJwksUrl(),
 		"neon_vpc_endpoint_assignment":  resourceVPCEndpointAssignment(),
 		"neon_vpc_endpoint_restriction": resourceVPCEndpointRestriction(),
-		"neon_org_api_key":              resourceOrgAPIKey(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
 		"neon_project":              dataSourceProject(),
@@ -154,6 +153,7 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewAPIKeyResource,
+		NewOrgAPIKeyResource,
 		NewBranchBackupScheduleResource,
 	}
 }
