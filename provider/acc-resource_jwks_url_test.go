@@ -184,32 +184,6 @@ resource "neon_jwks_url" "_" {
 			})
 	})
 
-	t.Run("shall fail role_names validation if the list is empty", func(t *testing.T) {
-		projectName := newProjectName(projectNamePrefix)
-		resource.Test(
-			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
-				Steps: []resource.TestStep{
-					{
-						Config: fmt.Sprintf(`resource "neon_project" "_" { name = "%s" }
-resource "neon_jwks_url" "_" {
-	project_id    = neon_project._.id
-	role_names    = []
-	provider_name = "Stack"
-	jwks_url      = "%s"
-	depends_on    = [neon_project._]
-}`, projectName, wantJwksUrl),
-						PlanOnly:    true,
-						ExpectError: regexp.MustCompile("Invalid role_names"),
-					},
-				},
-			})
-	})
-
 	t.Run("shall fail role_names validation if the list has more than 10 elements", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(

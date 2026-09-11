@@ -103,7 +103,7 @@ func (v roleNamesLengthValidator) ValidateList(ctx context.Context, req validato
 	}
 
 	length := len(req.ConfigValue.Elements())
-	if length < 1 || length > 10 {
+	if length > 10 {
 		resp.Diagnostics.AddAttributeError(
 			req.Path,
 			"Invalid role_names",
