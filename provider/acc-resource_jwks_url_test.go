@@ -182,4 +182,65 @@ resource "neon_jwks_url" "_" {
 				},
 			})
 	})
+
+	t.Run("shall fail role_names validation if the list is empty", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "_" { name = "%s" }
+resource "neon_jwks_url" "_" {
+	project_id    = neon_project._.id
+	role_names    = []
+	provider_name = "Stack"
+	jwks_url      = "%s"
+	depends_on    = [neon_project._]
+}`, projectName, wantJwksUrl),
+						PlanOnly:    true,
+						ExpectError: regexp.MustCompile("Invalid role_names"),
+					},
+				},
+			})
+	})
+
+	t.Run("shall fail role_names validation if the list has more than 10 elements", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "_" { name = "%s" }
+locals {
+	role_names = ["role0", "role1", "role2", "role3", "role4", "role5", "role6", "role7", "role8", "role9", "role10"]
+}
+resource "neon_role" "_" {
+	for_each = toset(local.role_names)
+	project_id = neon_project._.id
+	branch_id  = neon_project._.default_branch_id
+	name       = each.value
+}
+resource "neon_jwks_url" "_" {
+	project_id    = neon_project._.id
+	role_names    = local.role_names
+	provider_name = "Stack"
+	jwks_url      = "%s"
+	depends_on    = [neon_project._]
+}`, projectName, wantJwksUrl),
+						PlanOnly:    true,
+						ExpectError: regexp.MustCompile("Invalid role_names"),
+					},
+				},
+			})
+	})
 }
