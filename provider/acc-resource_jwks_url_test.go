@@ -35,6 +35,7 @@ func TestAccJwksUrl(t *testing.T) {
 
 	// Note that Neon verifies the URL upon provisioning, hence the Stack project must exist.
 	// Dmitry Kisler's Stack project ID.
+	// TODO: replace the link with the Neon owned IdP
 	idpProjectID := "527b63cb-1552-429a-af47-29518c184629"
 	wantJwksUrl := fmt.Sprintf("https://api.stack-auth.com/api/v1/projects/%s/.well-known/jwks.json", idpProjectID)
 	wantRoleName := "foo"
