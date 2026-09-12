@@ -35,3 +35,8 @@ website/vendor
 *.winfile eol=crlf
 
 .env
+
+# OpenSpec planning artifacts. Force-add on dedicated openspec/* branches
+# only — the convention is that openspec changes live on their own branch
+# off main so they never flow into feature PRs or into upstream.
+openspec/
