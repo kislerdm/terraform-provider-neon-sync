@@ -17,7 +17,7 @@ var _ resource.Resource = (*orgAPIKeyResource)(nil)
 var _ resource.ResourceWithConfigure = (*orgAPIKeyResource)(nil)
 
 type orgAPIKeyResource struct {
-	client *neonClient
+	client *neon.Client
 }
 
 type orgAPIKeyResourceModel struct {
@@ -77,11 +77,11 @@ func (r *orgAPIKeyResource) Configure(_ context.Context, req resource.ConfigureR
 		return
 	}
 
-	client, ok := req.ProviderData.(*neonClient)
+	client, ok := req.ProviderData.(*neon.Client)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neonClient, got an unexpected type.",
+			"Expected *neon.Client, got an unexpected type.",
 		)
 		return
 	}
@@ -112,7 +112,7 @@ func (r *orgAPIKeyResource) Create(ctx context.Context, req resource.CreateReque
 	var result neon.OrgApiKeyCreateResponse
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 		var err error
-		result, err = r.client.sdk.CreateOrgApiKey(state.OrgID.ValueString(), createRequest)
+		result, err = r.client.CreateOrgApiKey(state.OrgID.ValueString(), createRequest)
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
@@ -139,26 +139,22 @@ func (r *orgAPIKeyResource) Read(ctx context.Context, req resource.ReadRequest, 
 	var keys []neon.OrgApiKeysListResponseItem
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 		var err error
-		keys, err = r.client.sdk.ListOrgApiKeys(state.OrgID.ValueString())
+		keys, err = r.client.ListOrgApiKeys(state.OrgID.ValueString())
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	var found bool
 	for _, key := range keys {
 		if key.Name == state.Name.ValueString() {
 			state.ID = types.StringValue(strconv.FormatInt(key.ID, 10))
-			found = true
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
 		}
 	}
-	if !found {
-		tflog.Debug(ctx, "API key not found, removing from state", map[string]any{"name": state.Name.ValueString()})
-		resp.State.RemoveResource(ctx)
-	}
+	tflog.Debug(ctx, "API key not found, removing from state", map[string]any{"name": state.Name.ValueString()})
+	resp.State.RemoveResource(ctx)
 }
 
 func (r *orgAPIKeyResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -185,7 +181,7 @@ func (r *orgAPIKeyResource) Delete(ctx context.Context, req resource.DeleteReque
 	}
 
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		_, err := r.client.sdk.RevokeOrgApiKey(state.OrgID.ValueString(), id)
+		_, err := r.client.RevokeOrgApiKey(state.OrgID.ValueString(), id)
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {

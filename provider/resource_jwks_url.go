@@ -19,7 +19,7 @@ var _ resource.Resource = (*jwksURLResource)(nil)
 var _ resource.ResourceWithConfigure = (*jwksURLResource)(nil)
 
 type jwksURLResource struct {
-	client *neonClient
+	client *neon.Client
 }
 
 type jwksURLResourceModel struct {
@@ -117,11 +117,11 @@ func (r *jwksURLResource) Configure(_ context.Context, req resource.ConfigureReq
 		return
 	}
 
-	client, ok := req.ProviderData.(*neonClient)
+	client, ok := req.ProviderData.(*neon.Client)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neonClient, got an unexpected type.",
+			"Expected *neon.Client, got an unexpected type.",
 		)
 		return
 	}
@@ -163,9 +163,9 @@ func (r *jwksURLResource) Create(ctx context.Context, req resource.CreateRequest
 	var result neon.JWKSCreationOperation
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
 		var err error
-		result, err = r.client.sdk.AddProjectJWKS(state.ProjectID.ValueString(), cfg)
+		result, err = r.client.AddProjectJWKS(state.ProjectID.ValueString(), cfg)
 		if err == nil {
-			waitUnfinishedOperations(ctx, r.client.sdk, result.OperationsResponse.Operations)
+			waitUnfinishedOperations(ctx, r.client, result.OperationsResponse.Operations)
 		}
 		return err
 	}, ctx)...)
@@ -193,7 +193,7 @@ func (r *jwksURLResource) Read(ctx context.Context, req resource.ReadRequest, re
 	var result neon.ProjectJWKSResponse
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 		var err error
-		result, err = r.client.sdk.GetProjectJWKS(state.ProjectID.ValueString())
+		result, err = r.client.GetProjectJWKS(state.ProjectID.ValueString())
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
@@ -232,7 +232,7 @@ func (r *jwksURLResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		_, err := r.client.sdk.DeleteProjectJWKS(state.ProjectID.ValueString(), state.ID.ValueString())
+		_, err := r.client.DeleteProjectJWKS(state.ProjectID.ValueString(), state.ID.ValueString())
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {

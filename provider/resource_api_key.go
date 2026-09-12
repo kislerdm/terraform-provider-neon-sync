@@ -17,7 +17,7 @@ var _ resource.Resource = (*apiKeyResource)(nil)
 var _ resource.ResourceWithConfigure = (*apiKeyResource)(nil)
 
 type apiKeyResource struct {
-	client *neonClient
+	client *neon.Client
 }
 
 type apiKeyResourceModel struct {
@@ -65,11 +65,11 @@ func (r *apiKeyResource) Configure(_ context.Context, req resource.ConfigureRequ
 		return
 	}
 
-	client, ok := req.ProviderData.(*neonClient)
+	client, ok := req.ProviderData.(*neon.Client)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neonClient, got an unexpected type.",
+			"Expected *neon.Client, got an unexpected type.",
 		)
 		return
 	}
@@ -92,7 +92,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	var result neon.ApiKeyCreateResponse
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 		var err error
-		result, err = r.client.sdk.CreateApiKey(neon.ApiKeyCreateRequest{KeyName: state.Name.ValueString()})
+		result, err = r.client.CreateApiKey(neon.ApiKeyCreateRequest{KeyName: state.Name.ValueString()})
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
@@ -119,27 +119,23 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	var keys []neon.ApiKeysListResponseItem
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 		var err error
-		keys, err = r.client.sdk.ListApiKeys()
+		keys, err = r.client.ListApiKeys()
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	var found bool
 	for _, key := range keys {
 		if key.Name == state.Name.ValueString() {
 			state.ID = types.StringValue(strconv.FormatInt(key.ID, 10))
-			found = true
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
 		}
 	}
 
-	if !found {
-		tflog.Debug(ctx, "API key not found, removing from state", map[string]any{"name": state.Name.ValueString()})
-		resp.State.RemoveResource(ctx)
-	}
+	tflog.Debug(ctx, "API key not found, removing from state", map[string]any{"name": state.Name.ValueString()})
+	resp.State.RemoveResource(ctx)
 }
 
 func (r *apiKeyResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -166,7 +162,7 @@ func (r *apiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		_, err := r.client.sdk.RevokeApiKey(id)
+		_, err := r.client.RevokeApiKey(id)
 		return err
 	}, ctx)...)
 	if resp.Diagnostics.HasError() {
