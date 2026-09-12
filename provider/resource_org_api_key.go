@@ -2,56 +2,68 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"strconv"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-func resourceOrgAPIKey() *schema.Resource {
-	return &schema.Resource{
+var _ resource.Resource = (*orgAPIKeyResource)(nil)
+var _ resource.ResourceWithConfigure = (*orgAPIKeyResource)(nil)
+
+type orgAPIKeyResource struct {
+	client *neonClient
+}
+
+type orgAPIKeyResourceModel struct {
+	ID        types.String `tfsdk:"id"`
+	Name      types.String `tfsdk:"name"`
+	OrgID     types.String `tfsdk:"org_id"`
+	ProjectID types.String `tfsdk:"project_id"`
+	Key       types.String `tfsdk:"key"`
+}
+
+func NewOrgAPIKeyResource() resource.Resource {
+	return &orgAPIKeyResource{}
+}
+
+func (r *orgAPIKeyResource) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "neon_org_api_key"
+}
+
+func (r *orgAPIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+	resp.Schema = schema.Schema{
 		Description: `An org-specific key to access the Neon API.
 
 ~>**WARNING** The resource does not support import.
 `,
-		SchemaVersion: 1,
-		Importer: &schema.ResourceImporter{
-			StateContext: func(_ context.Context, _ *schema.ResourceData, _ interface{}) ([]*schema.ResourceData, error) {
-				return nil, errors.New("the resource does not support import, please recreate it instead")
-			},
-		},
-		CreateContext: resourceOrgAPIKeyCreateRetry,
-		ReadContext:   resourceOrgAPIKeyReadRetry,
-		DeleteContext: resourceOrgAPIKeyDeleteRetry,
-		Schema: map[string]*schema.Schema{
-			"name": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The name of the API Key.",
-			},
-			"org_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The organisation ID.",
-			},
-			"project_id": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				ForceNew:    true,
-				Description: "The project ID to which this key will grant the access to.",
-			},
-			"id": {
-				Type:        schema.TypeString,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
 				Computed:    true,
 				Description: "The API key ID.",
 			},
-			"key": {
-				Type:        schema.TypeString,
+			"name": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The name of the API Key.",
+			},
+			"org_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The organisation ID.",
+			},
+			"project_id": schema.StringAttribute{
+				Optional:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The project ID to which this key will grant the access to.",
+			},
+			"key": schema.StringAttribute{
 				Computed:    true,
 				Sensitive:   true,
 				Description: "The generated 64-bit token required to access the Neon API.",
@@ -60,85 +72,125 @@ func resourceOrgAPIKey() *schema.Resource {
 	}
 }
 
-func resourceOrgAPIKeyCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceOrgAPIKeyCreate, ctx, d, meta)
+func (r *orgAPIKeyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*neonClient)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			"Expected *neonClient, got an unexpected type.",
+		)
+		return
+	}
+
+	r.client = client
 }
 
-func resourceOrgAPIKeyCreate(_ context.Context, d *schema.ResourceData, meta interface{}) error {
-	req := neon.OrgApiKeyCreateRequest{
-		ApiKeyCreateRequest: neon.ApiKeyCreateRequest{
-			KeyName: d.Get("name").(string),
-		},
+func (r *orgAPIKeyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
-	if v, ok := d.GetOk("project_id"); ok {
-		s := v.(string)
-		req.ProjectID = &s
+
+	var state orgAPIKeyResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	resp, err := meta.(*neon.Client).CreateOrgApiKey(
-		d.Get("org_id").(string),
-		req,
-	)
-	if err != nil {
+
+	createRequest := neon.OrgApiKeyCreateRequest{
+		ApiKeyCreateRequest: neon.ApiKeyCreateRequest{KeyName: state.Name.ValueString()},
+	}
+	if !state.ProjectID.IsNull() && !state.ProjectID.IsUnknown() {
+		projectID := state.ProjectID.ValueString()
+		createRequest.ProjectID = &projectID
+	}
+
+	var result neon.OrgApiKeyCreateResponse
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		var err error
+		result, err = r.client.sdk.CreateOrgApiKey(state.OrgID.ValueString(), createRequest)
 		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	d.SetId(strconv.FormatInt(resp.ID, 10))
-	return d.Set("key", resp.Key)
+
+	state.ID = types.StringValue(strconv.FormatInt(result.ID, 10))
+	state.Key = types.StringValue(result.Key)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceOrgAPIKeyReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceOrgAPIKeyRead, ctx, d, meta)
-}
+func (r *orgAPIKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
 
-func resourceOrgAPIKeyRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	resp, err := meta.(*neon.Client).ListOrgApiKeys(d.Get("org_id").(string))
+	var state orgAPIKeyResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	if err == nil {
-		keyName := d.Get("name").(string)
+	var keys []neon.OrgApiKeysListResponseItem
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		var err error
+		keys, err = r.client.sdk.ListOrgApiKeys(state.OrgID.ValueString())
+		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-		var found bool
-		for _, v := range resp {
-			if keyName == v.Name {
-				d.SetId(strconv.FormatInt(v.ID, 10))
-				found = true
-				break
-			}
+	var found bool
+	for _, key := range keys {
+		if key.Name == state.Name.ValueString() {
+			state.ID = types.StringValue(strconv.FormatInt(key.ID, 10))
+			found = true
+			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+			return
 		}
+	}
+	if !found {
+		tflog.Debug(ctx, "API key not found, removing from state", map[string]any{"name": state.Name.ValueString()})
+		resp.State.RemoveResource(ctx)
+	}
+}
 
-		if !found {
-			tflog.Debug(ctx, "API key not found, removing from state", map[string]interface{}{"name": keyName})
-			d.SetId("")
-		}
+func (r *orgAPIKeyResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
+	resp.Diagnostics.AddError("Organization API Key Update Not Supported",
+		"Changing the API key attributes requires replacing the resource.")
+}
+
+func (r *orgAPIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
 
-	return err
-}
+	var state orgAPIKeyResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-func resourceOrgAPIKeyDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceOrgAPIKeyDelete, ctx, d, meta)
-}
-
-func resourceOrgAPIKeyDelete(_ context.Context, d *schema.ResourceData, meta interface{}) error {
-	id, err := strconv.ParseInt(d.Get("id").(string), 10, 64)
+	id, err := strconv.ParseInt(state.ID.ValueString(), 10, 64)
 	if err != nil {
-		return err
+		resp.Diagnostics.AddError("Unable to Parse API Key ID", err.Error())
+		return
 	}
 
-	if _, err := meta.(*neon.Client).RevokeOrgApiKey(d.Get("org_id").(string), id); err != nil {
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		_, err := r.client.sdk.RevokeOrgApiKey(state.OrgID.ValueString(), id)
 		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	if err = d.Set("key", ""); err != nil {
-		return err
-	}
-	if err = d.Set("name", ""); err != nil {
-		return err
-	}
-	if err = d.Set("project_id", ""); err != nil {
-		return err
-	}
-	if err = d.Set("org_id", ""); err != nil {
-		return err
-	}
-	d.SetId("")
-	return nil
+	resp.State.RemoveResource(ctx)
 }

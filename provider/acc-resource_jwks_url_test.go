@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +35,7 @@ func TestAccJwksUrl(t *testing.T) {
 
 	// Note that Neon verifies the URL upon provisioning, hence the Stack project must exist.
 	// Dmitry Kisler's Stack project ID.
+	// TODO: replace the link with the Neon owned IdP
 	idpProjectID := "527b63cb-1552-429a-af47-29518c184629"
 	wantJwksUrl := fmt.Sprintf("https://api.stack-auth.com/api/v1/projects/%s/.well-known/jwks.json", idpProjectID)
 	wantRoleName := "foo"
@@ -58,9 +59,9 @@ resource "neon_jwks_url" "_" {
 		config := resourceDefinition(projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -126,9 +127,9 @@ resource "neon_jwks_url" "_" {
 
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -145,9 +146,9 @@ resource "neon_jwks_url" "_" {
 		config := resourceDefinition(projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
 					},
 				},
 				Steps: []resource.TestStep{
@@ -178,6 +179,41 @@ resource "neon_jwks_url" "_" {
 							assert.False(t, ok, "resource neon_jwks_url._ should be destroyed")
 							return nil
 						},
+					},
+				},
+			})
+	})
+
+	t.Run("shall fail role_names validation if the list has more than 10 elements", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "_" { name = "%s" }
+locals {
+	role_names = ["role0", "role1", "role2", "role3", "role4", "role5", "role6", "role7", "role8", "role9", "role10"]
+}
+resource "neon_role" "_" {
+	for_each = toset(local.role_names)
+	project_id = neon_project._.id
+	branch_id  = neon_project._.default_branch_id
+	name       = each.value
+}
+resource "neon_jwks_url" "_" {
+	project_id    = neon_project._.id
+	role_names    = local.role_names
+	provider_name = "Stack"
+	jwks_url      = "%s"
+	depends_on    = [neon_project._]
+}`, projectName, wantJwksUrl),
+						PlanOnly:    true,
+						ExpectError: regexp.MustCompile("Invalid role_names"),
 					},
 				},
 			})
