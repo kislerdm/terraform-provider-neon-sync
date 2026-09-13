@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated dependencies:
-  - Neon Go SDK: [v0.23.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.23.0)
+  - Neon Go SDK: [v0.24.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.24.0)
 
 ## [v0.18.0] - 2026-09-12
 
