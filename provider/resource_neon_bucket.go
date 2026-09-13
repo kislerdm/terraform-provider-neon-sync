@@ -30,6 +30,8 @@ type neonBucketResourceModel struct {
 	BranchID    types.String `tfsdk:"branch_id"`
 	Name        types.String `tfsdk:"name"`
 	AccessLevel types.String `tfsdk:"access_level"`
+	S3Endpoint  types.String `tfsdk:"s3_endpoint"`
+	Region      types.String `tfsdk:"region"`
 }
 
 func NewNeonBucketResource() resource.Resource {
@@ -76,6 +78,14 @@ func (r *neonBucketResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Description: "Access level for the bucket. " +
 					"Defaults to `private`. " +
 					"Set to `public_read` to allow anonymous `GetObject`/`HeadObject` on objects in this bucket.",
+			},
+			"s3_endpoint": schema.StringAttribute{
+				Computed:    true,
+				Description: "The S3-compatible endpoint URL for this branch.",
+			},
+			"region": schema.StringAttribute{
+				Computed:    true,
+				Description: "The AWS region for this branch's object storage.",
 			},
 		},
 	}
@@ -162,6 +172,28 @@ func (r *neonBucketResource) ImportState(ctx context.Context, req resource.Impor
 	branchID := els[1]
 	bucketName := els[2]
 
+	var branchStorageResp neon.BranchStorage
+	resp.Diagnostics.Append(
+		projectReadiness.RetryWithFallbackFramework(
+			func(ctx context.Context) error {
+				var err error
+				branchStorageResp, err = r.client.GetProjectBranchStorage(projectID, branchID)
+				return err
+			}, ctx, map[int]func(context.Context) error{
+				http.StatusNotFound: func(_ context.Context) error {
+					resp.Diagnostics.AddError(
+						"Bucket Not Found",
+						"Branchable-storage is not enabled.",
+					)
+					return nil
+				},
+			},
+		)...,
+	)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	var result neon.BucketsListResponse
 	resp.Diagnostics.Append(
 		projectReadiness.RetryFramework(func(ctx context.Context) error {
@@ -186,7 +218,7 @@ func (r *neonBucketResource) ImportState(ctx context.Context, req resource.Impor
 				BranchID:  types.StringValue(branchID),
 				Name:      types.StringValue(bucketName),
 			}
-			setNeonBucketModel(&state, bucket)
+			setNeonBucketModel(&state, bucket, branchStorageResp)
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
 		}
@@ -207,6 +239,26 @@ func (r *neonBucketResource) Create(ctx context.Context, req resource.CreateRequ
 	var state neonBucketResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var branchStorageResp neon.BranchStorage
+	resp.Diagnostics.Append(
+		projectReadiness.RetryFramework(
+			func(ctx context.Context) error {
+				var err error
+				branchStorageResp, err = r.client.GetProjectBranchStorage(state.ProjectID.ValueString(),
+					state.BranchID.ValueString())
+				return err
+			}, ctx,
+		)...,
+	)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !branchStorageResp.Enabled {
+		resp.Diagnostics.AddError("Branch Storage Not Enabled", "The branch storage is not enabled.")
 		return
 	}
 
@@ -235,7 +287,7 @@ func (r *neonBucketResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	setNeonBucketModel(&state, result.Bucket)
+	setNeonBucketModel(&state, result.Bucket, branchStorageResp)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -248,6 +300,26 @@ func (r *neonBucketResource) Read(ctx context.Context, req resource.ReadRequest,
 	var state neonBucketResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var branchStorageResp neon.BranchStorage
+	resp.Diagnostics.Append(
+		projectReadiness.RetryFramework(
+			func(ctx context.Context) error {
+				var err error
+				branchStorageResp, err = r.client.GetProjectBranchStorage(state.ProjectID.ValueString(),
+					state.BranchID.ValueString())
+				return err
+			}, ctx,
+		)...,
+	)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !branchStorageResp.Enabled {
+		resp.Diagnostics.AddError("Branch Storage Not Enabled", "The branch storage is not enabled.")
 		return
 	}
 
@@ -274,7 +346,7 @@ func (r *neonBucketResource) Read(ctx context.Context, req resource.ReadRequest,
 
 	for _, bucket := range result.Buckets {
 		if bucket.Name == state.Name.ValueString() {
-			setNeonBucketModel(&state, bucket)
+			setNeonBucketModel(&state, bucket, branchStorageResp)
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
 		}
@@ -324,10 +396,12 @@ func (r *neonBucketResource) Delete(ctx context.Context, req resource.DeleteRequ
 	resp.State.RemoveResource(ctx)
 }
 
-func setNeonBucketModel(model *neonBucketResourceModel, bucket neon.Bucket) {
+func setNeonBucketModel(model *neonBucketResourceModel, bucket neon.Bucket, branchStorageResp neon.BranchStorage) {
 	model.ID = types.StringValue(neonBucketID(model.ProjectID.ValueString(), model.BranchID.ValueString(), bucket.Name))
 	model.Name = types.StringValue(bucket.Name)
 	model.AccessLevel = types.StringValue(bucket.AccessLevel.String())
+	model.S3Endpoint = types.StringValue(branchStorageResp.S3Endpoint)
+	model.Region = types.StringValue(branchStorageResp.Region)
 }
 
 func neonBucketID(projectID, branchID, bucketName string) string {

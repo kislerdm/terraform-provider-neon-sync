@@ -58,6 +58,15 @@ resource "neon_bucket" "this" {
 							resource.TestCheckResourceAttr("neon_bucket.this", "name", "foo"),
 							resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
 								"private"),
+							resource.TestCheckResourceAttr("neon_bucket.this", "region",
+								"us-east-2"),
+							resource.TestCheckResourceAttrWith("neon_bucket.this", "s3_endpoint",
+								func(value string) error {
+									if value == "" {
+										return fmt.Errorf("expected S3 endpoint to be set")
+									}
+									return nil
+								}),
 							func(_ *terraform.State) error {
 								pr, err := readProjectInfo(client, projectName)
 								if err != nil {
@@ -112,6 +121,15 @@ resource "neon_bucket" "this" {
 							resource.TestCheckResourceAttr("neon_bucket.this", "name", "foo"),
 							resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
 								"public_read"),
+							resource.TestCheckResourceAttr("neon_bucket.this", "region",
+								"us-east-2"),
+							resource.TestCheckResourceAttrWith("neon_bucket.this", "s3_endpoint",
+								func(value string) error {
+									if value == "" {
+										return fmt.Errorf("expected S3 endpoint to be set")
+									}
+									return nil
+								}),
 							func(_ *terraform.State) error {
 								pr, err := readProjectInfo(client, projectName)
 								if err != nil {
@@ -179,8 +197,19 @@ resource "neon_bucket" "this" {
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
 						ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, "foo"),
-						Check: resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
-							"public_read"),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
+								"public_read"),
+							resource.TestCheckResourceAttr("neon_bucket.this", "region",
+								"us-east-2"),
+							resource.TestCheckResourceAttrWith("neon_bucket.this", "s3_endpoint",
+								func(value string) error {
+									if value == "" {
+										return fmt.Errorf("expected S3 endpoint to be set")
+									}
+									return nil
+								}),
+						),
 					},
 				},
 			},
@@ -249,7 +278,8 @@ resource "neon_bucket" "this" {
 	t.Run("shall fail to import non-existent bucket", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		prCreateResp, err := client.CreateProject(neon.ProjectCreateRequest{Project: neon.ProjectCreateRequestProject{
-			Name: &projectName,
+			Name:     &projectName,
+			RegionID: pointer("aws-us-east-2"),
 		}})
 		assert.NoErrorf(t, err, "could not provision the project")
 
@@ -260,6 +290,54 @@ resource "neon_bucket" "this" {
 			nil, nil, nil, nil, nil, nil)
 		assert.NoErrorf(t, err, "could not list branches")
 		branchID := br.Branches[0].ID
+
+		_, err = client.CreateProjectBranchBucket(projectID, branchID, neon.BucketCreateRequest{
+			Name:        "foo",
+			AccessLevel: &neon.BucketCreateRequestAccessLevelPublicRead,
+		})
+		assert.NoErrorf(t, err, "could not create bucket")
+
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+					"neon": func() (tfprotov6.ProviderServer, error) {
+						return newAccTestFramework(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
+  project_id   = "%s"
+  branch_id    = "%s"
+  name         = "bar"
+}
+`, projectID, branchID),
+						ImportState:   true,
+						ResourceName:  "neon_bucket.this",
+						ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, "bar"),
+						ExpectError:   regexp.MustCompile("Bucket Not Found"),
+					},
+				},
+			},
+		)
+	})
+
+	t.Run("shall fail to import non-existent bucket, no buckets exist in the project", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		prCreateResp, err := client.CreateProject(neon.ProjectCreateRequest{Project: neon.ProjectCreateRequestProject{
+			Name:     &projectName,
+			RegionID: pointer("aws-us-east-2"),
+		}})
+		assert.NoErrorf(t, err, "could not provision the project")
+
+		projectID := prCreateResp.Project.ID
+		sleepDuringRunningOperations(t, client, projectID)
+
+		br, err := client.ListProjectBranches(projectID,
+			nil, nil, nil, nil, nil, nil)
+		assert.NoErrorf(t, err, "could not list branches")
+		branchID := br.Branches[0].ID
+
 		resource.Test(
 			t, resource.TestCase{
 				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){

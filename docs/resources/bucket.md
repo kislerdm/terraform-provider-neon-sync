@@ -48,6 +48,8 @@ resource "neon_bucket" "public" {
 ### Read-Only
 
 - `id` (String) The bucket resource ID.
+- `region` (String) The AWS region for this branch's object storage.
+- `s3_endpoint` (String) The S3-compatible endpoint URL for this branch.
 
 
 
