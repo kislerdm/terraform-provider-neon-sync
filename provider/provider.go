@@ -147,6 +147,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewOrgAPIKeyResource,
 		NewJWKSURLResource,
 		NewBranchBackupScheduleResource,
+		NewNeonBucketResource,
 	}
 }
 
