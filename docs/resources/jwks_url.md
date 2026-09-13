@@ -4,7 +4,6 @@ description: |-
   Project JWKS URL. See details: https://neon.com/docs/data-api/custom-authentication-providers
 
 ~>**WARNING** The resource does not support import.
-
 ---
 
 # neon_jwks_url (Resource)
@@ -12,7 +11,6 @@ description: |-
 Project JWKS URL. See details: https://neon.com/docs/data-api/custom-authentication-providers
 
 ~>**WARNING** The resource does not support import.
-
 
 ## Example Usage
 
@@ -78,7 +76,7 @@ resource "neon_jwks_url" "custom" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The JWKS configuration ID.
 
 
 
