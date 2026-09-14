@@ -16,9 +16,9 @@ import (
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-var _ resource.Resource = (*neonBucketResource)(nil)
 var _ resource.ResourceWithConfigure = (*neonBucketResource)(nil)
 var _ resource.ResourceWithModifyPlan = (*neonBucketResource)(nil)
+var _ resource.ResourceWithImportState = (*neonBucketResource)(nil)
 
 type neonBucketResource struct {
 	client *neon.Client
