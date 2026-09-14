@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
@@ -61,4 +62,11 @@ func parseComplexID(s string) (complexID, error) {
 		BranchID:  spl[1],
 		Name:      spl[2],
 	}, nil
+}
+
+func stringChanged(prior, planned types.String) bool {
+	if prior.IsUnknown() || planned.IsUnknown() || prior.IsNull() || planned.IsNull() {
+		return false
+	}
+	return prior.ValueString() != planned.ValueString()
 }

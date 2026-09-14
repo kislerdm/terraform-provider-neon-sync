@@ -148,6 +148,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewJWKSURLResource,
 		NewBranchBackupScheduleResource,
 		NewNeonBucketResource,
+		NewNeonServiceCredentialResource,
 	}
 }
 
@@ -176,4 +177,12 @@ func newAccTestFramework() tfprotov6.ProviderServer {
 		panic(err)
 	}
 	return o
+}
+
+func newProviderFactory() map[string]func() (tfprotov6.ProviderServer, error) {
+	return map[string]func() (tfprotov6.ProviderServer, error){
+		"neon": func() (tfprotov6.ProviderServer, error) {
+			return NewServer("accTest")
+		},
+	}
 }
