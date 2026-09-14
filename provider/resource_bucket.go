@@ -146,10 +146,10 @@ func (r *neonBucketResource) ModifyPlan(ctx context.Context, req resource.Modify
 		return
 	}
 
-	if neonBucketStringChanged(prior.ProjectID, planned.ProjectID) ||
-		neonBucketStringChanged(prior.BranchID, planned.BranchID) ||
-		neonBucketStringChanged(prior.Name, planned.Name) ||
-		neonBucketStringChanged(prior.AccessLevel, planned.AccessLevel) {
+	if stringChanged(prior.ProjectID, planned.ProjectID) ||
+		stringChanged(prior.BranchID, planned.BranchID) ||
+		stringChanged(prior.Name, planned.Name) ||
+		stringChanged(prior.AccessLevel, planned.AccessLevel) {
 		resp.Diagnostics.AddError(
 			"Neon Bucket Update Not Supported",
 			"Changing bucket attributes is not supported. Remove and recreate the resource instead.",
@@ -406,11 +406,4 @@ func setNeonBucketModel(model *neonBucketResourceModel, bucket neon.Bucket, bran
 
 func neonBucketID(projectID, branchID, bucketName string) string {
 	return fmt.Sprintf("%s/%s/%s", projectID, branchID, bucketName)
-}
-
-func neonBucketStringChanged(prior, planned types.String) bool {
-	if prior.IsUnknown() || planned.IsUnknown() || prior.IsNull() || planned.IsNull() {
-		return false
-	}
-	return prior.ValueString() != planned.ValueString()
 }
