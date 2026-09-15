@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
@@ -36,11 +35,7 @@ func TestBucket(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {
@@ -98,11 +93,7 @@ resource "neon_bucket" "this" {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {
@@ -180,11 +171,7 @@ resource "neon_bucket" "this" {
 
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
@@ -219,11 +206,7 @@ resource "neon_bucket" "this" {
 	t.Run("shall fail to import a bucket given invalid id", func(t *testing.T) {
 		resource.UnitTest(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: `resource "neon_bucket" "this" {
@@ -299,11 +282,7 @@ resource "neon_bucket" "this" {
 
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
@@ -340,11 +319,7 @@ resource "neon_bucket" "this" {
 
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
@@ -378,11 +353,7 @@ resource "neon_bucket" "this" {
 `, projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: config,
@@ -429,11 +400,7 @@ resource "neon_bucket" "this" {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
-					"neon": func() (tfprotov6.ProviderServer, error) {
-						return newAccTestFramework(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {

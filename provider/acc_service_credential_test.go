@@ -34,7 +34,7 @@ func TestServiceCredential(t *testing.T) {
 	t.Run("shall provision a service credential", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(t, resource.TestCase{
-			ProtoV6ProviderFactories: newProviderFactory(),
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					Config: serviceCredentialConfig(projectName, "credential"),
@@ -82,7 +82,7 @@ func TestServiceCredential(t *testing.T) {
 		assert.NoError(t, err)
 
 		resource.Test(t, resource.TestCase{
-			ProtoV6ProviderFactories: newProviderFactory(),
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					Config: fmt.Sprintf(`resource "neon_service_credential" "this" {
@@ -111,7 +111,7 @@ func TestServiceCredential(t *testing.T) {
   scopes     = ["functions:invoke"]
 }`
 		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: newProviderFactory(),
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					Config:        config,
@@ -149,7 +149,7 @@ func TestServiceCredential(t *testing.T) {
 		projectID, branchID := createServiceCredentialProject(t, client, projectName)
 
 		resource.Test(t, resource.TestCase{
-			ProtoV6ProviderFactories: newProviderFactory(),
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					Config: fmt.Sprintf(`resource "neon_service_credential" "this" {
@@ -175,7 +175,7 @@ func TestServiceCredential(t *testing.T) {
 		config := serviceCredentialConfig(projectName, name)
 
 		resource.Test(t, resource.TestCase{
-			ProtoV6ProviderFactories: newProviderFactory(),
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -221,7 +221,7 @@ func TestServiceCredential(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(
 			t, resource.TestCase{
-				ProtoV6ProviderFactories: newProviderFactory(),
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: serviceCredentialConfig(projectName, "foo"),
