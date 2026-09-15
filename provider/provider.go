@@ -149,6 +149,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewBranchBackupScheduleResource,
 		NewNeonBucketResource,
 		NewNeonServiceCredentialResource,
+		NewNeonFunctionResource,
 	}
 }
 
