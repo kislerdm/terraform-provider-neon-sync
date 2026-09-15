@@ -151,7 +151,8 @@ resource "neon_bucket" "this" {
 	t.Run("shall import a bucket", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
 		prCreateResp, err := client.CreateProject(neon.ProjectCreateRequest{Project: neon.ProjectCreateRequestProject{
-			Name: &projectName,
+			Name:     &projectName,
+			RegionID: pointer("aws-us-east-2"),
 		}})
 		assert.NoErrorf(t, err, "could not provision the project")
 
