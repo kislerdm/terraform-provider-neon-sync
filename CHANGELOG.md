@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated dependencies:
   - Neon Go SDK: [v0.24.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.24.0)
 
+## [v0.19.0] - 2026-09-16
+
+### Added
+
+- New `neon_trigger` resource. Manages Neon Triggers (Function invocations on a cron schedule or after a branch-bucket object upload). Discriminated by a `type` field (`schedule` or `storage_object_created`); conditional schema validation enforced in `ModifyPlan`. CRUD lifecycle exposed; import is intentionally not supported (server mints `trigger_id`).
+
 ## [v0.18.0] - 2026-09-12
 
 ### Fixed 

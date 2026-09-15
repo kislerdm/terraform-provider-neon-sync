@@ -1,0 +1,177 @@
+package provider
+
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	neon "github.com/kislerdm/neon-sdk-go"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestAccNeonTrigger(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectNamePrefix := "neonTrigger"
+
+	t.Cleanup(func() {
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		for _, project := range resp.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	t.Run("shall provision a schedule trigger", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		name := "sched"
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: triggerScheduleConfig(projectName, name, "myfn", "*/5 * * * *"),
+					Check: func(state *terraform.State) error {
+						rs, ok := state.RootModule().Resources["neon_trigger.this"]
+						if !ok {
+							return fmt.Errorf("neon_trigger.this not found in state")
+						}
+						assert.Equal(t, "schedule", rs.Primary.Attributes["type"])
+						assert.Equal(t, "*/5 * * * *", rs.Primary.Attributes["schedule.cron"])
+						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
+						assert.NotEmpty(t, rs.Primary.Attributes["id"])
+						return nil
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("shall provision a storage_object_created trigger", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: triggerStorageConfig(projectName, "stor", "myfn", "mybucket", "logs/"),
+					Check: func(state *terraform.State) error {
+						rs, ok := state.RootModule().Resources["neon_trigger.this"]
+						if !ok {
+							return fmt.Errorf("neon_trigger.this not found in state")
+						}
+						assert.Equal(t, "storage_object_created", rs.Primary.Attributes["type"])
+						assert.Equal(t, "mybucket", rs.Primary.Attributes["storage_object_created.bucket_name"])
+						assert.Equal(t, "logs/", rs.Primary.Attributes["storage_object_created.prefix"])
+						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
+						return nil
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("shall update mutable attributes without forced replacement", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		name := "upd"
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: triggerScheduleConfig(projectName, name, "myfn", "*/5 * * * *"),
+				},
+				{
+					Config: triggerScheduleConfig(projectName, name, "myfn", "*/10 * * * *"),
+					Check: func(state *terraform.State) error {
+						rs, ok := state.RootModule().Resources["neon_trigger.this"]
+						if !ok {
+							return fmt.Errorf("neon_trigger.this not found in state")
+						}
+						assert.Equal(t, "*/10 * * * *", rs.Primary.Attributes["schedule.cron"])
+						return nil
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("shall reject import with a clear diagnostic", func(t *testing.T) {
+		config := `resource "neon_trigger" "this" {
+  project_id     = "0"
+  branch_id      = "br-1"
+  type           = "schedule"
+  name           = "imp"
+  function_slug  = "myfn"
+  schedule       = {
+    cron = "*/5 * * * *"
+  }
+}`
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config:        config,
+					ImportState:   true,
+					ResourceName:  "neon_trigger.this",
+					ImportStateId: "0/br-1/trig-1",
+					ExpectError: regexp.MustCompile(
+						"neon_trigger does not support import",
+					),
+				},
+			},
+		})
+	})
+}
+
+func triggerScheduleConfig(projectName, triggerName, fnSlug, cron string) string {
+	return fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_trigger" "this" {
+  project_id     = neon_project.this.id
+  branch_id      = neon_project.this.default_branch_id
+  name           = %q
+  type           = "schedule"
+  function_slug  = %q
+  schedule = {
+    cron = %q
+  }
+}
+`, projectName, triggerName, fnSlug, cron)
+}
+
+func triggerStorageConfig(projectName, triggerName, fnSlug, bucket, prefix string) string {
+	return fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_bucket" "this" {
+  project_id = neon_project.this.id
+  branch_id  = neon_project.this.default_branch_id
+  name       = %q
+}
+
+resource "neon_trigger" "this" {
+  project_id     = neon_project.this.id
+  branch_id      = neon_project.this.default_branch_id
+  name           = %q
+  type           = "storage_object_created"
+  function_slug  = %q
+  storage_object_created = {
+    bucket_name = neon_bucket.this.name
+    prefix      = %q
+  }
+  depends_on = [neon_bucket.this]
+}
+`, projectName, bucket, triggerName, fnSlug, prefix)
+}

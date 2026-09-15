@@ -1,0 +1,19 @@
+---
+page_title: "{{ .Name }} {{ .Type }} - {{.ProviderName}}"
+description: |-
+  {{ .Description }}
+---
+
+# {{ .Name }} ({{ .Type }})
+
+{{ .Description }}
+
+## Example Usage
+
+{{ tffile "examples/resources/neon_trigger/resource.tf" }}
+
+{{ .SchemaMarkdown }}
+
+## Import
+
+The Neon Trigger cannot be imported because the server mints `trigger_id` on create. Re-author the trigger in your Terraform configuration to manage it.
