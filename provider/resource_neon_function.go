@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -39,19 +37,19 @@ type neonFunctionResource struct {
 }
 
 type neonFunctionResourceModel struct {
-	ID                       types.String `tfsdk:"id"`
-	ProjectID                types.String `tfsdk:"project_id"`
-	BranchID                 types.String `tfsdk:"branch_id"`
-	Slug                     types.String `tfsdk:"slug"`
-	Runtime                  types.String `tfsdk:"runtime"`
-	Name                     types.String `tfsdk:"name"`
-	ZipFilePath              types.String `tfsdk:"zip_file_path"`
-	EnvironmentVariables     types.Map    `tfsdk:"environment_variables"`
-	CreatedAt                types.String `tfsdk:"created_at"`
-	InvocationURL            types.String `tfsdk:"invocation_url"`
-	CurrentDeploymentID      types.Int64  `tfsdk:"current_deployment_id"`
-	CurrentDeploymentStatus  types.String `tfsdk:"current_deployment_status"`
-	EnvironmentVariableNames types.List   `tfsdk:"environment_variable_names"`
+	ID                       types.String      `tfsdk:"id"`
+	ProjectID                types.String      `tfsdk:"project_id"`
+	BranchID                 types.String      `tfsdk:"branch_id"`
+	Slug                     types.String      `tfsdk:"slug"`
+	Runtime                  types.String      `tfsdk:"runtime"`
+	Name                     types.String      `tfsdk:"name"`
+	ZipFilePath              types.String      `tfsdk:"zip_file_path"`
+	EnvironmentVariables     map[string]string `tfsdk:"environment_variables"`
+	CreatedAt                types.String      `tfsdk:"created_at"`
+	InvocationURL            types.String      `tfsdk:"invocation_url"`
+	CurrentDeploymentID      types.Int64       `tfsdk:"current_deployment_id"`
+	CurrentDeploymentStatus  types.String      `tfsdk:"current_deployment_status"`
+	EnvironmentVariableNames []string          `tfsdk:"environment_variable_names"`
 }
 
 func NewNeonFunctionResource() resource.Resource {
@@ -306,12 +304,6 @@ func (r *neonFunctionResource) Create(ctx context.Context, req resource.CreateRe
 	}
 	defer zipFile.Close()
 
-	envVars, diags := readEnvironmentVariables(ctx, plan.EnvironmentVariables)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	runtime := plan.Runtime.ValueString()
 
 	resp.Diagnostics.Append(
@@ -322,7 +314,7 @@ func (r *neonFunctionResource) Create(ctx context.Context, req resource.CreateRe
 					plan.BranchID.ValueString(),
 					plan.Slug.ValueString(),
 					zipFile,
-					envVars,
+					plan.EnvironmentVariables,
 					&runtime,
 				)
 				return err
@@ -359,7 +351,6 @@ func (r *neonFunctionResource) Create(ctx context.Context, req resource.CreateRe
 	// stable. Computed attributes are filled by setNeonFunctionModel.
 	plan.Runtime = types.StringValue(runtime)
 	plan.ZipFilePath = types.StringValue(zipPath)
-	plan.EnvironmentVariables = buildEnvironmentVariablesMap(ctx, envVars)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -507,58 +498,14 @@ func setNeonFunctionModel(model *neonFunctionResourceModel, fn neon.NeonFunction
 	if fn.CurrentDeployment != nil {
 		model.CurrentDeploymentID = types.Int64Value(int64(fn.CurrentDeployment.ID))
 		model.CurrentDeploymentStatus = types.StringValue(fn.CurrentDeployment.Status.String())
-		if len(fn.CurrentDeployment.Environment) == 0 {
-			model.EnvironmentVariableNames = types.ListNull(types.StringType)
-		} else {
-			elems := make([]attr.Value, 0, len(fn.CurrentDeployment.Environment))
-			for _, name := range fn.CurrentDeployment.Environment {
-				elems = append(elems, types.StringValue(name))
-			}
-			model.EnvironmentVariableNames = types.ListValueMust(types.StringType, elems)
-		}
+		model.EnvironmentVariableNames = fn.CurrentDeployment.Environment
 	} else {
 		model.CurrentDeploymentID = types.Int64Null()
 		model.CurrentDeploymentStatus = types.StringNull()
-		model.EnvironmentVariableNames = types.ListNull(types.StringType)
+		model.EnvironmentVariableNames = nil
 	}
 }
 
 func neonFunctionID(projectID, branchID, slug string) string {
 	return fmt.Sprintf("%s/%s/%s", projectID, branchID, slug)
-}
-
-// readEnvironmentVariables converts the Terraform map attribute into a
-// Go map[string]string suitable for the SDK. Returns an empty map and
-// no diagnostics when the attribute is null or unknown.
-func readEnvironmentVariables(ctx context.Context, attrVal types.Map) (map[string]string, diag.Diagnostics) {
-	if attrVal.IsNull() || attrVal.IsUnknown() {
-		return map[string]string{}, nil
-	}
-	raw := make(map[string]attr.Value, len(attrVal.Elements()))
-	diags := attrVal.ElementsAs(ctx, &raw, false)
-	if diags.HasError() {
-		return nil, diags
-	}
-	out := make(map[string]string, len(raw))
-	for k, v := range raw {
-		out[k] = v.(types.String).ValueString()
-	}
-	return out, nil
-}
-
-// buildEnvironmentVariablesMap re-encodes the SDK map back into the
-// Terraform map attribute so the state carries the user-supplied values.
-func buildEnvironmentVariablesMap(_ context.Context, env map[string]string) types.Map {
-	if len(env) == 0 {
-		return types.MapNull(types.StringType)
-	}
-	elems := make(map[string]attr.Value, len(env))
-	for k, v := range env {
-		elems[k] = types.StringValue(v)
-	}
-	m, diags := types.MapValue(types.StringType, elems)
-	if diags.HasError() {
-		return types.MapNull(types.StringType)
-	}
-	return m
 }
