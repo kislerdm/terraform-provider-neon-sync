@@ -1,8 +1,10 @@
 package provider
 
 import (
-	"archive/zip"
+	_ "embed"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,37 +14,6 @@ import (
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
 )
-
-// writeFunctionZip creates a minimal Node.js 24 function bundle in a
-// temporary directory and returns its absolute path. The function is a
-// trivial HTTP handler; the Functions service does not execute it during
-// this test, only the build pipeline runs.
-func writeFunctionZip(t *testing.T) string {
-	t.Helper()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "function.zip")
-
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
-	zw := zip.NewWriter(f)
-	src := []byte("module.exports = async () => ({ statusCode: 200, body: 'ok' });\n")
-	w, err := zw.Create("index.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(src); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
 
 func TestFunction(t *testing.T) {
 	if os.Getenv("TF_ACC") != "1" {
@@ -54,11 +25,6 @@ func TestFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orgID := os.Getenv("ORG_ID")
-	if orgID == "" {
-		t.Skip("ORG_ID must be set")
-	}
-
 	projectNamePrefix := "function"
 
 	t.Cleanup(func() {
@@ -68,18 +34,14 @@ func TestFunction(t *testing.T) {
 		}
 	})
 
-	t.Run("shall create a function and update its name in place", func(t *testing.T) {
-		projectName := newProjectName(projectNamePrefix)
-		zipPath := writeFunctionZip(t)
+	wd, err := os.Getwd()
+	assert.NoError(t, err)
+	zipPath := filepath.Join(wd, "testdata/function/function.zip")
 
-		resource.Test(
-			t, resource.TestCase{
-				ProtoV6ProviderFactories: newProviderFactories(),
-				Steps: []resource.TestStep{
-					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-  org_id    = "%s"
-  name      = "%s"
+	t.Run("shall create a function and update its name in place", func(t *testing.T) {
+		var newFunctionConfig = func(projectName string, functionName string) string {
+			return fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
   region_id = "aws-us-east-2"
 }
 
@@ -88,10 +50,20 @@ resource "neon_function" "this" {
   branch_id     = neon_project.this.default_branch_id
   slug          = "hello"
   runtime       = "nodejs24"
-  name          = "hello"
-  zip_file_path = "%s"
+  name          = %q
+  zip_file_path = %q
 }
-`, orgID, projectName, zipPath),
+`, projectName, functionName, zipPath)
+		}
+
+		projectName := newProjectName(projectNamePrefix)
+
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: newFunctionConfig(projectName, "hello"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_function.this", "slug", "hello"),
 							resource.TestCheckResourceAttr("neon_function.this", "runtime", "nodejs24"),
@@ -125,21 +97,7 @@ resource "neon_function" "this" {
 						),
 					},
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-  org_id    = "%s"
-  name      = "%s"
-  region_id = "aws-us-east-2"
-}
-
-resource "neon_function" "this" {
-  project_id    = neon_project.this.id
-  branch_id     = neon_project.this.default_branch_id
-  slug          = "hello"
-  runtime       = "nodejs24"
-  name          = "renamed"
-  zip_file_path = "%s"
-}
-`, orgID, projectName, zipPath),
+						Config: newFunctionConfig(projectName, "renamed"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_function.this", "name", "renamed"),
 							func(_ *terraform.State) error {
@@ -159,10 +117,65 @@ resource "neon_function" "this" {
 									t.Logf("warning: sdk cross-check skipped: %v", err)
 									return nil
 								}
+								assert.Equal(t, "hello", rsp.Function.Slug)
 								assert.Equal(t, "renamed", rsp.Function.Name)
 								return nil
 							},
 						),
+					},
+				},
+			},
+		)
+	})
+
+	t.Run("shall set the environment variables for the runtime", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_function" "this" {
+  project_id    = neon_project.this.id
+  branch_id     = neon_project.this.default_branch_id
+  slug          = "hello"
+  runtime       = "nodejs24"
+  name          = "hello"
+  zip_file_path = %q
+  
+  environment_variables = {
+    FOO = 1
+    BAR = "baz"
+  }
+}
+`, projectName, zipPath),
+						Check: func(state *terraform.State) error {
+							fn, ok := state.RootModule().Resources["neon_function.this"]
+							assert.True(t, ok)
+							invocationURL := fn.Primary.Attributes["invocation_url"]
+							assert.NotEmpty(t, invocationURL)
+
+							resp, err := http.Get(invocationURL)
+							if err != nil {
+								return err
+							}
+							assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+							var setEnvVars map[string]string
+							assert.NoError(t, json.NewDecoder(resp.Body).Decode(&setEnvVars))
+							assert.NoError(t, resp.Body.Close())
+
+							assert.Equal(t, "1", setEnvVars["FOO"])
+							assert.Equal(t, "baz", setEnvVars["BAR"])
+
+							return nil
+						},
 					},
 				},
 			},

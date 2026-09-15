@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -49,7 +50,7 @@ type neonFunctionResourceModel struct {
 	InvocationURL            types.String      `tfsdk:"invocation_url"`
 	CurrentDeploymentID      types.Int64       `tfsdk:"current_deployment_id"`
 	CurrentDeploymentStatus  types.String      `tfsdk:"current_deployment_status"`
-	EnvironmentVariableNames []string          `tfsdk:"environment_variable_names"`
+	EnvironmentVariableNames types.List        `tfsdk:"environment_variable_names"`
 }
 
 func NewNeonFunctionResource() resource.Resource {
@@ -442,15 +443,8 @@ func (r *neonFunctionResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	setNeonFunctionModel(&plan, fn)
-	// Preserve immutable attrs that Update leaves unchanged in the SDK.
-	plan.ProjectID = state.ProjectID
-	plan.BranchID = state.BranchID
-	plan.Slug = state.Slug
-	plan.Runtime = state.Runtime
-	plan.ZipFilePath = state.ZipFilePath
-	plan.EnvironmentVariables = state.EnvironmentVariables
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	setNeonFunctionModel(&state, fn)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 func (r *neonFunctionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -498,11 +492,19 @@ func setNeonFunctionModel(model *neonFunctionResourceModel, fn neon.NeonFunction
 	if fn.CurrentDeployment != nil {
 		model.CurrentDeploymentID = types.Int64Value(int64(fn.CurrentDeployment.ID))
 		model.CurrentDeploymentStatus = types.StringValue(fn.CurrentDeployment.Status.String())
-		model.EnvironmentVariableNames = fn.CurrentDeployment.Environment
+		if len(fn.CurrentDeployment.Environment) == 0 {
+			model.EnvironmentVariableNames = types.ListNull(types.StringType)
+		} else {
+			elems := make([]attr.Value, 0, len(fn.CurrentDeployment.Environment))
+			for _, name := range fn.CurrentDeployment.Environment {
+				elems = append(elems, types.StringValue(name))
+			}
+			model.EnvironmentVariableNames = types.ListValueMust(types.StringType, elems)
+		}
 	} else {
 		model.CurrentDeploymentID = types.Int64Null()
 		model.CurrentDeploymentStatus = types.StringNull()
-		model.EnvironmentVariableNames = nil
+		model.EnvironmentVariableNames = types.ListNull(types.StringType)
 	}
 }
 
