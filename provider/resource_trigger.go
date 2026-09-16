@@ -359,6 +359,11 @@ func (r *neonTriggerResource) Delete(ctx context.Context, req resource.DeleteReq
 			return nil
 		},
 	})...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.State.RemoveResource(ctx)
 }
 
 func buildTriggerCreateRequest(plan *neonTriggerResourceModel) neon.TriggerCreateRequest {
