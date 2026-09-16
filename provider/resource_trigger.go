@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -89,7 +88,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"function_slug": schema.StringAttribute{
 				Required:    true,
-				Validators:  []validator.String{triggerSlugValidator{}},
 				Description: "The branch-local Function slug resolved when an occurrence is consumed.",
 			},
 			"function_path": schema.StringAttribute{
@@ -107,7 +105,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Attributes: map[string]schema.Attribute{
 					"cron": schema.StringAttribute{
 						Required:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 1, max: 1024}},
 						Description: "Numeric five-field cron expression (minute through day-of-week), interpreted in UTC.",
 					},
 				},
@@ -117,12 +114,10 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Required:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 3, max: 63}},
 						Description: "The exact object-storage bucket name to watch.",
 					},
 					"prefix": schema.StringAttribute{
 						Optional:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 1, max: 1024}},
 						Description: "Optional object-key prefix. Max 1024 UTF-8 bytes.",
 					},
 				},
@@ -562,55 +557,4 @@ func (triggerTypeValidator) ValidateString(_ context.Context, req validator.Stri
 		"Invalid trigger type",
 		fmt.Sprintf("%q is not a valid trigger type; expected `schedule` or `storage_object_created`.", s),
 	)
-}
-
-type triggerSlugValidator struct{}
-
-func (triggerSlugValidator) Description(_ context.Context) string {
-	return "function_slug must match ^[a-z0-9]{1,20}$"
-}
-
-func (v triggerSlugValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-var triggerSlugPattern = regexp.MustCompile(`^[a-z0-9]{1,20}$`)
-
-func (triggerSlugValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	if !triggerSlugPattern.MatchString(req.ConfigValue.ValueString()) {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid function_slug",
-			"function_slug must match ^[a-z0-9]{1,20}$",
-		)
-	}
-}
-
-type stringLengthBetweenValidator struct {
-	min, max int
-}
-
-func (v stringLengthBetweenValidator) Description(_ context.Context) string {
-	return fmt.Sprintf("string length must be between %d and %d", v.min, v.max)
-}
-
-func (v stringLengthBetweenValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-func (v stringLengthBetweenValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	n := len(req.ConfigValue.ValueString())
-	if n < v.min || n > v.max {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid length",
-			fmt.Sprintf("length must be between %d and %d, got %d", v.min, v.max, n),
-		)
-	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -20,11 +19,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
-
-// slugPattern is the DNS-label pattern enforced by Neon for function slugs.
-// Lowercase, alphanumeric and hyphen; cannot start or end with a hyphen.
-// Source: openapi spec, NeonFunction.slug description.
-var slugPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 var (
 	_ resource.Resource                = (*neonFunctionResource)(nil)
@@ -85,10 +79,7 @@ func (r *neonFunctionResource) Schema(_ context.Context, _ resource.SchemaReques
 			"slug": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: requiresReplace,
-				Validators: []validator.String{
-					slugValidator{},
-				},
-				Description: "Branch-unique identifier for the function. Forms the invocation URL host together with the branch ID.",
+				Description:   "Branch-unique identifier for the function. Forms the invocation URL host together with the branch ID.",
 			},
 			"runtime": schema.StringAttribute{
 				Required:      true,
@@ -139,40 +130,6 @@ func (r *neonFunctionResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description:   "Names of the function's environment variables. Values are never returned by the API.",
 			},
 		},
-	}
-}
-
-// slugValidator enforces the DNS-label pattern: lowercase alphanumeric
-// and hyphens, 1-63 characters, cannot start or end with a hyphen.
-type slugValidator struct{}
-
-func (slugValidator) Description(context.Context) string {
-	return "must be a lowercase DNS-label (1-63 chars, lowercase alphanumeric and hyphens, cannot start or end with a hyphen)"
-}
-
-func (v slugValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-func (slugValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	v := req.ConfigValue.ValueString()
-	if len(v) < 1 || len(v) > 63 {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid slug length",
-			"slug must be 1-63 characters",
-		)
-		return
-	}
-	if !slugPattern.MatchString(v) {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid slug",
-			"slug must be a lowercase DNS-label (lowercase alphanumeric and hyphens, cannot start or end with a hyphen)",
-		)
 	}
 }
 
