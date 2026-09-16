@@ -37,7 +37,6 @@ type neonTriggerResourceModel struct {
 	StorageObjectCreated *storageObjectCreatedModel `tfsdk:"storage_object_created"`
 	TriggerID            types.String               `tfsdk:"trigger_id"`
 	Version              types.Int64                `tfsdk:"version"`
-	SourceBranchID       types.String               `tfsdk:"source_branch_id"`
 	NextRunAt            types.String               `tfsdk:"next_run_at"`
 	Inherited            types.Bool                 `tfsdk:"inherited"`
 }
@@ -129,10 +128,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"version": schema.Int64Attribute{
 				Computed:    true,
 				Description: "Monotonic configuration version.",
-			},
-			"source_branch_id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Public branch_id of the branch that authored the effective configuration.",
 			},
 			"next_run_at": schema.StringAttribute{
 				Computed:    true,
@@ -362,7 +357,9 @@ func (r *neonTriggerResource) Delete(ctx context.Context, req resource.DeleteReq
 }
 
 func buildTriggerCreateRequest(plan *neonTriggerResourceModel) neon.TriggerCreateRequest {
-	cfg := neon.TriggerCreateRequest{}
+	cfg := neon.TriggerCreateRequest{
+		Type: plan.Type.ValueString(),
+	}
 
 	typ := plan.Type.ValueString()
 	switch typ {
@@ -495,7 +492,6 @@ func setNeonTriggerModelFromSchedule(model *neonTriggerResourceModel, st neon.Sc
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	model.SourceBranchID = types.StringValue(st.SourceBranchID)
 	if st.NextRunAt != "" {
 		model.NextRunAt = types.StringValue(st.NextRunAt)
 	} else {
@@ -517,7 +513,6 @@ func setNeonTriggerModelFromStorage(model *neonTriggerResourceModel, st neon.Sto
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	model.SourceBranchID = types.StringValue(st.SourceBranchID)
 	model.NextRunAt = types.StringNull()
 	soc := &storageObjectCreatedModel{
 		BucketName: types.StringValue(st.StorageObjectCreated.BucketName),
