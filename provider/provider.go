@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"math/rand"
+	"net/http"
 	"os"
 	"time"
 
@@ -115,6 +116,15 @@ func (p *frameworkProvider) Schema(_ context.Context, _ frameworkprovider.Schema
 	}
 }
 
+type httpClient interface {
+	Do(r *http.Request) (*http.Response, error)
+}
+
+type providerAdapter struct {
+	sdk        *neon.Client
+	httpClient httpClient
+}
+
 func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider.ConfigureRequest,
 	resp *frameworkprovider.ConfigureResponse) {
 	var config frameworkProviderConfigModel
@@ -138,7 +148,12 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 		return
 	}
 
-	resp.ResourceData = client
+	providerClient := providerAdapter{
+		sdk:        client,
+		httpClient: cfg.HTTPClient,
+	}
+
+	resp.ResourceData = &providerClient
 }
 
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {

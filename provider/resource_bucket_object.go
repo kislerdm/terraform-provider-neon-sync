@@ -15,6 +15,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -23,9 +25,10 @@ import (
 
 var _ resource.ResourceWithConfigure = (*neonBucketObjectResource)(nil)
 var _ resource.ResourceWithImportState = (*neonBucketObjectResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*neonBucketObjectResource)(nil)
 
 type neonBucketObjectResource struct {
-	client *neon.Client
+	client *providerAdapter
 }
 
 type neonBucketObjectResourceModel struct {
@@ -37,9 +40,11 @@ type neonBucketObjectResourceModel struct {
 	Content       types.String `tfsdk:"content"`
 	ContentBase64 types.String `tfsdk:"content_base64"`
 	Source        types.String `tfsdk:"source"`
+	IsDirectory   types.Bool   `tfsdk:"is_directory"`
 	ContentType   types.String `tfsdk:"content_type"`
 	ETag          types.String `tfsdk:"etag"`
 	ContentLength types.Int64  `tfsdk:"content_length"`
+	Trigger       types.String `tfsdk:"trigger"`
 }
 
 func NewNeonBucketObjectResource() resource.Resource {
@@ -80,19 +85,24 @@ func (r *neonBucketObjectResource) Schema(_ context.Context, _ resource.SchemaRe
 				Description:   "The object key.",
 			},
 			"content": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "The content of the object. Note that it's not persisted in the Terraform state.",
+				Optional: true,
+				Computed: true,
+				Description: `The content of the object. 
+Note that it's not persisted in the Terraform state.
+It **conflicts** with "content_base64", "source".`,
 			},
 			"content_base64": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "The base64-encoded content of the object. Note that it's not persisted in the Terraform state.",
+				Optional: true,
+				Computed: true,
+				Description: `The base64-encoded content of the object. 
+Note that it's not persisted in the Terraform state. 
+It **conflicts** with "content" and "source".`,
 			},
 			"source": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "The absolute path to the the object's content.",
+				Optional: true,
+				Computed: true,
+				Description: `The absolute path to the the object's content.
+It **conflicts** with "content" and "content_base64".`,
 			},
 			"content_type": schema.StringAttribute{
 				Optional:    true,
@@ -107,6 +117,22 @@ func (r *neonBucketObjectResource) Schema(_ context.Context, _ resource.SchemaRe
 				Computed:    true,
 				Description: "The object size in bytes.",
 			},
+			"trigger": schema.StringAttribute{
+				Computed:      true,
+				Optional:      true,
+				PlanModifiers: requiresReplaceString,
+				Description: `The provider-computed md5 check sum of the object, or user-provided string 
+that is used as a trigger to re-upload the object.`,
+			},
+			"is_directory": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+				Description: `Set to true to provision a "folder". Note that it **conflicts** with "content", "content_base64", "source".`,
+			},
 		},
 	}
 }
@@ -115,12 +141,61 @@ func (r *neonBucketObjectResource) Configure(_ context.Context, req resource.Con
 	if req.ProviderData == nil {
 		return
 	}
-	client, ok := req.ProviderData.(*neon.Client)
+	client, ok := req.ProviderData.(*providerAdapter)
 	if !ok {
-		resp.Diagnostics.AddError("Unexpected Resource Configure Type", "Expected *neon.Client, got an unexpected type.")
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type",
+			"Expected providerAdapter, got an unexpected type.")
 		return
 	}
 	r.client = client
+}
+
+func (r *neonBucketObjectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.Config.Raw.IsNull() {
+		return
+	}
+
+	var planned neonBucketObjectResourceModel
+	var config neonBucketObjectResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &planned)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	contentDefined := !config.Content.IsNull() && !config.Content.IsUnknown()
+	contentBase64Defined := !config.ContentBase64.IsNull() && !config.ContentBase64.IsUnknown()
+	sourceDefined := !config.Source.IsNull() && !config.Source.IsUnknown()
+	isDir := !config.IsDirectory.IsNull() && !config.IsDirectory.IsUnknown() && config.IsDirectory.ValueBool()
+	if config.IsDirectory.IsNull() || config.IsDirectory.IsUnknown() {
+		isDir = !planned.IsDirectory.IsNull() && !planned.IsDirectory.IsUnknown() && planned.IsDirectory.ValueBool()
+	}
+
+	switch {
+	case contentDefined && contentBase64Defined && sourceDefined:
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"content", "content_base64" and "source" cannot be specified together`)
+	case contentDefined && contentBase64Defined:
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"content" and "content_base64" cannot be specified together`)
+	case contentDefined && sourceDefined:
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"content" and "source" cannot be specified together`)
+	case contentBase64Defined && sourceDefined:
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"content_base64" and "source" cannot be specified together`)
+	case isDir && (contentDefined || contentBase64Defined || sourceDefined):
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"is_directory" cannot be specified with "content", "content_base64" or "source"`)
+	case !isDir && !contentDefined && !contentBase64Defined && !sourceDefined:
+		resp.Diagnostics.AddError("conflicting configuration",
+			`either of the attributes must be provided: 
+"is_directory", or "content", or "content_base64" or "source"`)
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 func (r *neonBucketObjectResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -229,7 +304,7 @@ func (r *neonBucketObjectResource) Delete(ctx context.Context, req resource.Dele
 		objectKey = placeholderKey
 	}
 	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(_ context.Context) error {
-		return r.client.DeleteProjectBranchBucketObject(state.ProjectID.ValueString(), state.BranchID.ValueString(), state.Bucket.ValueString(), encodedObjectKey(objectKey))
+		return r.client.sdk.DeleteProjectBranchBucketObject(state.ProjectID.ValueString(), state.BranchID.ValueString(), state.Bucket.ValueString(), encodedObjectKey(objectKey))
 	}, ctx, map[int]func(context.Context) error{
 		http.StatusNotFound: func(_ context.Context) error { return nil },
 	})...)
@@ -268,7 +343,7 @@ func (r *neonBucketObjectResource) upload(ctx context.Context, model *neonBucket
 		Operation:   neon.PresignRequestOperationUpload,
 		ContentType: contentType,
 	}
-	presigned, err := r.client.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
+	presigned, err := r.client.sdk.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
 	if err != nil {
 		return err
 	}
@@ -298,7 +373,7 @@ func (r *neonBucketObjectResource) refresh(ctx context.Context, model *neonBucke
 	}
 
 	cfg := neon.PresignRequest{Operation: neon.PresignRequestOperationDownload}
-	presigned, err := r.client.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
+	presigned, err := r.client.sdk.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
 	if err != nil {
 		return err
 	}
@@ -338,7 +413,7 @@ var errBucketObjectNotFound = errors.New("bucket object not found")
 func (r *neonBucketObjectResource) findObject(ctx context.Context, model *neonBucketObjectResourceModel, objectKey string) (*neon.BucketObject, error) {
 	var cursor *string
 	for {
-		result, err := r.client.ListProjectBranchBucketObjects(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), nil, nil, cursor, nil)
+		result, err := r.client.sdk.ListProjectBranchBucketObjects(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), nil, nil, cursor, nil)
 		if err != nil {
 			return nil, err
 		}
