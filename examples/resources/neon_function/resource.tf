@@ -7,7 +7,7 @@ resource "neon_project" "example" {
 # at the root; the Functions service builds it on deploy.
 resource "local_file" "function_source" {
   filename = "${path.module}/function.zip"
-  content = templatefile("${path.module}/index.js.tftpl", {})
+  content  = templatefile("${path.module}/index.js.tftpl", {})
 }
 
 # the file provisioner pattern shown below packages the source into a zip

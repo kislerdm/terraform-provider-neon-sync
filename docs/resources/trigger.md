@@ -1,14 +1,12 @@
 ---
 page_title: "neon_trigger Resource - terraform-provider-neon"
 description: |-
-  Manages a Neon scoped service credential.
+  Manages a Neon trigger (Function invocation on a schedule or after a branch-bucket object upload).
 ---
 
 # neon_trigger (Resource)
 
-Manages a Neon trigger (Function invocation on a cron schedule or after a branch-bucket object upload). A trigger is branch-scoped and references a Function via `function_slug`. Two trigger types are supported, discriminated by the `type` field: `schedule` (cron-based) and `storage_object_created` (object-upload).
-
-~> **Note:** Neon Triggers is a beta service. The schema may shift as the service evolves; see the [Neon Triggers documentation](https://neon.tech/docs/guides/triggers) for the current contract.
+Manages a Neon trigger (Function invocation on a schedule or after a branch-bucket object upload).
 
 ## Example Usage
 
@@ -69,26 +67,26 @@ resource "neon_trigger" "storage" {
 
 - `enabled` (Boolean) Whether future occurrences should fire the trigger.
 - `function_path` (String) Path passed to the target Function. Defaults to `/`.
-- `schedule` (Block, Optional) Schedule configuration. Required when `type` is `schedule`.
-- `storage_object_created` (Block, Optional) Storage-object trigger configuration. Required when `type` is `storage_object_created`.
+- `schedule` (Attributes) (see [below for nested schema](#nestedatt--schedule))
+- `storage_object_created` (Attributes) (see [below for nested schema](#nestedatt--storage_object_created))
 
 ### Read-Only
 
-- `id` (String) Composite ID of the form `<project_id>/<branch_id>/<trigger_id>`.
+- `id` (String) Composite ID of the form <project_id>/<branch_id>/<trigger_id>.
 - `inherited` (Boolean) True when the effective configuration was authored on an ancestor branch.
 - `next_run_at` (String) Next scheduled occurrence as an RFC 3339 UTC timestamp. Null while disabled or inherited and not explicitly enabled on this branch.
-- `source_branch_id` (String) Public `branch_id` of the branch that authored the effective configuration.
 - `trigger_id` (String) Opaque, server-minted trigger ID.
 - `version` (Number) Monotonic configuration version.
 
-<a id="nestedblock--schedule"></a>
+<a id="nestedatt--schedule"></a>
 ### Nested Schema for `schedule`
 
 Required:
 
 - `cron` (String) Numeric five-field cron expression (minute through day-of-week), interpreted in UTC.
 
-<a id="nestedblock--storage_object_created"></a>
+
+<a id="nestedatt--storage_object_created"></a>
 ### Nested Schema for `storage_object_created`
 
 Required:
@@ -99,6 +97,9 @@ Optional:
 
 - `prefix` (String) Optional object-key prefix. Max 1024 UTF-8 bytes.
 
+
+
+
 ## Import
 
-The Neon Trigger cannot be imported. The server mints `trigger_id` on create, and the resource is intentionally not importable. Re-author the trigger in your Terraform configuration to manage it.
+The Neon Trigger cannot be imported because the server mints `trigger_id` on create. Re-author the trigger in your Terraform configuration to manage it.

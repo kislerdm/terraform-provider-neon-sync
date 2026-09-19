@@ -22,7 +22,7 @@ resource "neon_project" "example" {
 # at the root; the Functions service builds it on deploy.
 resource "local_file" "function_source" {
   filename = "${path.module}/function.zip"
-  content = templatefile("${path.module}/index.js.tftpl", {})
+  content  = templatefile("${path.module}/index.js.tftpl", {})
 }
 
 # the file provisioner pattern shown below packages the source into a zip
@@ -50,12 +50,12 @@ resource "neon_function" "example" {
 - `project_id` (String) The Neon project ID.
 - `runtime` (String) Runtime for the function. Currently only `nodejs24` is supported.
 - `slug` (String) Branch-unique identifier for the function. Forms the invocation URL host together with the branch ID.
-- `zip_file_path` (String, Sensitive) Path to a local ZIP archive of the function source. Required on create.
 
 ### Optional
 
-- `environment_variables` (Map of String, Sensitive) Environment variables to expose to the function. Values are write-only and never returned by the API. **Known limit:** setting non-empty values currently fails at `terraform apply` due to an upstream Plugin Framework reflection bug. Omit the attribute or set it to `{}` to avoid the failure.
+- `environment_variables` (Map of String, Sensitive) Environment variables to expose to the function. Values are write-only and never returned by the API. Known limit: setting non-empty values currently fails at apply due to an upstream Plugin Framework reflection bug. Omit the attribute or set it to `{}` to avoid the failure.
 - `name` (String) Free-form display name for the function. Updatable in place.
+- `zip_file_path` (String, Sensitive) Path to a local ZIP archive of the function source. Required on create.
 
 ### Read-Only
 
@@ -65,6 +65,8 @@ resource "neon_function" "example" {
 - `environment_variable_names` (List of String) Names of the function's environment variables. Values are never returned by the API.
 - `id` (String) Composite ID of the form <project_id>/<branch_id>/<slug>.
 - `invocation_url` (String) URL at which the function is invoked.
+
+
 
 ## Import
 
