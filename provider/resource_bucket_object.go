@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -45,6 +46,32 @@ type neonBucketObjectResourceModel struct {
 	ETag          types.String `tfsdk:"etag"`
 	ContentLength types.Int64  `tfsdk:"content_length"`
 	Trigger       types.String `tfsdk:"trigger"`
+}
+
+func (v neonBucketObjectResourceModel) readContent() (body io.Reader, checksum string, err error) {
+	if !v.IsDirectory.ValueBool() {
+		var content []byte
+		if !v.Content.IsNull() && !v.Content.IsUnknown() {
+			content = []byte(v.Content.ValueString())
+		}
+		if !v.ContentBase64.IsNull() && !v.ContentBase64.IsUnknown() {
+			var err error
+			content, err = base64.StdEncoding.DecodeString(v.ContentBase64.ValueString())
+			if err != nil {
+				return nil, "", fmt.Errorf("unable to decode base64 content: %w", err)
+			}
+		}
+		if !v.Source.IsNull() && !v.Source.IsUnknown() {
+			var err error
+			content, err = os.ReadFile(v.Source.ValueString())
+			if err != nil {
+				return nil, "", fmt.Errorf("unable to open source file: %w", err)
+			}
+		}
+		body = bytes.NewReader(content)
+		checksum = fmt.Sprintf("%x", md5.Sum(content))
+	}
+	return body, checksum, nil
 }
 
 func NewNeonBucketObjectResource() resource.Resource {
@@ -85,22 +112,21 @@ func (r *neonBucketObjectResource) Schema(_ context.Context, _ resource.SchemaRe
 				Description:   "The object key.",
 			},
 			"content": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
+				Optional:  true,
+				Sensitive: true,
 				Description: `The content of the object. 
 Note that it's not persisted in the Terraform state.
 It **conflicts** with "content_base64", "source".`,
 			},
 			"content_base64": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
+				Optional:  true,
+				Sensitive: true,
 				Description: `The base64-encoded content of the object. 
 Note that it's not persisted in the Terraform state. 
 It **conflicts** with "content" and "source".`,
 			},
 			"source": schema.StringAttribute{
 				Optional: true,
-				Computed: true,
 				Description: `The absolute path to the the object's content.
 It **conflicts** with "content" and "content_base64".`,
 			},
@@ -118,9 +144,8 @@ It **conflicts** with "content" and "content_base64".`,
 				Description: "The object size in bytes.",
 			},
 			"trigger": schema.StringAttribute{
-				Computed:      true,
-				Optional:      true,
-				PlanModifiers: requiresReplaceString,
+				Computed: true,
+				Optional: true,
 				Description: `The provider-computed md5 check sum of the object, or user-provided string 
 that is used as a trigger to re-upload the object.`,
 			},
@@ -193,6 +218,12 @@ func (r *neonBucketObjectResource) ModifyPlan(ctx context.Context, req resource.
 			`either of the attributes must be provided: 
 "is_directory", or "content", or "content_base64" or "source"`)
 	}
+
+	if isDir && !planned.ContentType.IsNull() && !config.ContentType.IsNull() {
+		resp.Diagnostics.AddError("conflicting configuration",
+			`"content_type" cannot be specified when "is_directory" is true"`)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -210,24 +241,39 @@ func (r *neonBucketObjectResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	objectKey, content, contentType, err := bucketObjectInput(plan)
+	body, checksum, err := plan.readContent()
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid Bucket Object Input", err.Error())
+		resp.Diagnostics.AddError("unable to read content", err.Error())
 		return
 	}
-	if err := r.upload(ctx, &plan, objectKey, content, contentType); err != nil {
-		resp.Diagnostics.AddError("Unable to Upload Bucket Object", err.Error())
+	if plan.Trigger.IsNull() || plan.Trigger.IsUnknown() {
+		plan.Trigger = types.StringValue(checksum)
+		if body == nil {
+			plan.Trigger = types.StringNull()
+		}
+	}
+
+	projectID := plan.ProjectID.ValueString()
+	branchID := plan.BranchID.ValueString()
+	bucket := plan.Bucket.ValueString()
+	key := plan.Key.ValueString()
+	if plan.IsDirectory.ValueBool() {
+		key = folderObjectKey(key)
+	}
+
+	etag, contentLength, contentType, err := upload(ctx, r.client.sdk, r.client.httpClient,
+		plan.ContentType.ValueStringPointer(), body, projectID, branchID, bucket, key)
+	if err != nil {
+		resp.Diagnostics.AddError("unable to upload bucket object", err.Error())
 		return
 	}
 
-	plan.ID = types.StringValue(bucketObjectID(plan.ProjectID.ValueString(), plan.BranchID.ValueString(), plan.Bucket.ValueString(), plan.Key.ValueString()))
-	// Do not persist any source content in Terraform state.
-	plan.Content = types.StringNull()
-	plan.ContentBase64 = types.StringNull()
-	plan.Source = types.StringNull()
-	if err := r.refresh(ctx, &plan, objectKey); err != nil {
-		resp.Diagnostics.AddError("Unable to Read Uploaded Bucket Object", err.Error())
-		return
+	plan.ID = types.StringValue(filepath.Join(projectID, branchID, bucket, plan.Key.ValueString()))
+	plan.ETag = types.StringValue(etag)
+	plan.ContentLength = types.Int64Value(contentLength)
+	plan.ContentType = types.StringValue(contentType)
+	if plan.IsDirectory.ValueBool() {
+		plan.ContentType = types.StringNull()
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -243,15 +289,29 @@ func (r *neonBucketObjectResource) Read(ctx context.Context, req resource.ReadRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	objectKey := state.Key.ValueString()
-	if err := r.refresh(ctx, &state, objectKey); err != nil {
-		if errors.Is(err, errBucketObjectNotFound) || isNeonNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("Unable to Read Bucket Object", err.Error())
+
+	key := state.Key.ValueString()
+	if state.IsDirectory.ValueBool() {
+		key = folderObjectKey(key)
+	}
+
+	headers, err := readObjectHeaders(ctx, r.client.sdk, state.ProjectID.ValueString(), state.BranchID.ValueString(),
+		state.Bucket.ValueString(), key)
+	switch {
+	case err == nil:
+	case errors.As(err, &neon.Error{}) && err.(neon.Error).HTTPCode == http.StatusNotFound:
+		resp.State.RemoveResource(ctx)
+		return
+	case errors.As(err, &objectNotFoundError{}):
+		resp.State.RemoveResource(ctx)
+		return
+	default:
+		resp.Diagnostics.AddError("unable to read object headers", err.Error())
 		return
 	}
+
+	state.ContentLength = types.Int64Value(headers.Size)
+	state.ETag = types.StringValue(headers.Etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -261,21 +321,40 @@ func (r *neonBucketObjectResource) Update(ctx context.Context, req resource.Upda
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	objectKey, content, contentType, err := bucketObjectInput(plan)
+
+	body, checksum, err := plan.readContent()
 	if err != nil {
-		resp.Diagnostics.AddError("Invalid Bucket Object Input", err.Error())
+		resp.Diagnostics.AddError("unable to read content", err.Error())
 		return
 	}
-	if err := r.upload(ctx, &plan, objectKey, content, contentType); err != nil {
-		resp.Diagnostics.AddError("Unable to Upload Bucket Object", err.Error())
+
+	projectID := plan.ProjectID.ValueString()
+	branchID := plan.BranchID.ValueString()
+	bucket := plan.Bucket.ValueString()
+	key := plan.Key.ValueString()
+	if plan.IsDirectory.ValueBool() {
+		key = folderObjectKey(key)
+	}
+
+	etag, contentLength, contentType, err := upload(ctx, r.client.sdk, r.client.httpClient,
+		plan.ContentType.ValueStringPointer(), body, projectID, branchID, bucket, key)
+	if err != nil {
+		resp.Diagnostics.AddError("unable to upload bucket object", err.Error())
 		return
 	}
-	plan.Content = types.StringNull()
-	plan.ContentBase64 = types.StringNull()
-	plan.Source = types.StringNull()
-	if err := r.refresh(ctx, &plan, objectKey); err != nil {
-		resp.Diagnostics.AddError("Unable to Read Uploaded Bucket Object", err.Error())
-		return
+	if plan.Trigger.IsNull() || plan.Trigger.IsUnknown() {
+		plan.Trigger = types.StringValue(checksum)
+		if body == nil {
+			plan.Trigger = types.StringNull()
+		}
+	}
+
+	plan.ID = types.StringValue(filepath.Join(projectID, branchID, bucket, plan.Key.ValueString()))
+	plan.ETag = types.StringValue(etag)
+	plan.ContentLength = types.Int64Value(contentLength)
+	plan.ContentType = types.StringValue(contentType)
+	if plan.IsDirectory.ValueBool() {
+		plan.ContentType = types.StringNull()
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -290,21 +369,17 @@ func (r *neonBucketObjectResource) Delete(ctx context.Context, req resource.Dele
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	objectKey := state.Key.ValueString()
-	if _, err := r.findObject(ctx, &state, objectKey); err != nil {
-		placeholderKey := folderObjectKey(objectKey)
-		if _, placeholderErr := r.findObject(ctx, &state, placeholderKey); placeholderErr != nil {
-			if errors.Is(placeholderErr, errBucketObjectNotFound) {
-				resp.State.RemoveResource(ctx)
-				return
-			}
-			resp.Diagnostics.AddError("Unable to Find Bucket Object", placeholderErr.Error())
-			return
-		}
-		objectKey = placeholderKey
+	key := state.Key.ValueString()
+	if state.IsDirectory.ValueBool() {
+		key = folderObjectKey(key)
 	}
 	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(_ context.Context) error {
-		return r.client.sdk.DeleteProjectBranchBucketObject(state.ProjectID.ValueString(), state.BranchID.ValueString(), state.Bucket.ValueString(), encodedObjectKey(objectKey))
+		return r.client.sdk.DeleteProjectBranchBucketObject(
+			state.ProjectID.ValueString(),
+			state.BranchID.ValueString(),
+			state.Bucket.ValueString(),
+			url.PathEscape(key),
+		)
 	}, ctx, map[int]func(context.Context) error{
 		http.StatusNotFound: func(_ context.Context) error { return nil },
 	})...)
@@ -314,160 +389,169 @@ func (r *neonBucketObjectResource) Delete(ctx context.Context, req resource.Dele
 	resp.State.RemoveResource(ctx)
 }
 
-func (r *neonBucketObjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	parts := strings.Split(req.ID, "/")
-	if len(parts) < 4 {
-		resp.Diagnostics.AddError("Invalid Neon Bucket Object Import ID", "Expected <project_id>/<branch_id>/<bucket>/<key>.")
+func (r *neonBucketObjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse) {
+	els := strings.SplitN(req.ID, "/", 4)
+	if len(els) != 4 {
+		resp.Diagnostics.AddError("Invalid Neon Bucket Object Import ID",
+			"Expected <project_id>/<branch_id>/<bucket>/<key>.")
 		return
 	}
 	state := neonBucketObjectResourceModel{
-		ID: types.StringValue(req.ID), ProjectID: types.StringValue(parts[0]), BranchID: types.StringValue(parts[1]),
-		Bucket: types.StringValue(parts[2]), Key: types.StringValue(strings.Join(parts[3:], "/")),
-		Content: types.StringNull(), ContentBase64: types.StringNull(), Source: types.StringNull(),
+		ID:            types.StringValue(req.ID),
+		ProjectID:     types.StringValue(els[0]),
+		BranchID:      types.StringValue(els[1]),
+		Bucket:        types.StringValue(els[2]),
+		Key:           types.StringValue(els[3]),
+		Content:       types.StringNull(),
+		ContentBase64: types.StringNull(),
+		Trigger:       types.StringNull(),
+		ContentType:   types.StringNull(),
+	}
+	if state.Source.IsUnknown() {
+		state.Source = types.StringNull()
 	}
 	if r.client == nil {
 		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
 		return
 	}
-	if err := r.refresh(ctx, &state, state.Key.ValueString()); err != nil {
-		if err = r.refresh(ctx, &state, folderObjectKey(state.Key.ValueString())); err != nil {
-			resp.Diagnostics.AddError("Bucket Object Not Found", err.Error())
-			return
-		}
+	key := state.Key.ValueString()
+	if state.IsDirectory.ValueBool() {
+		key = folderObjectKey(key)
 	}
+	meta, err := readObjectHeaders(ctx, r.client.sdk,
+		state.ProjectID.ValueString(), state.BranchID.ValueString(), state.Bucket.ValueString(), key,
+	)
+	if err != nil {
+		resp.Diagnostics.AddError("error reading object meta", err.Error())
+		return
+	}
+	state.ContentLength = types.Int64Value(meta.Size)
+	state.ETag = types.StringValue(meta.Etag)
+
+	var presignResp neon.PresignResponse
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+		var err error
+		presignResp, err = r.client.sdk.PresignProjectBranchBucketObject(state.ProjectID.ValueString(),
+			state.BranchID.ValueString(),
+			state.Bucket.ValueString(),
+			key, neon.PresignRequest{Operation: neon.PresignRequestOperationDownload},
+		)
+		return err
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	contentType, ok := presignResp.Headers["Content-Type"]
+	if !ok {
+		contentType, ok = presignResp.Headers["content-type"]
+	}
+	if ok {
+		state.ContentType = types.StringValue(fmt.Sprint(contentType))
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *neonBucketObjectResource) upload(ctx context.Context, model *neonBucketObjectResourceModel, objectKey string, content []byte, contentType *string) error {
-	cfg := neon.PresignRequest{
-		Operation:   neon.PresignRequestOperationUpload,
-		ContentType: contentType,
-	}
-	presigned, err := r.client.sdk.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
-	if err != nil {
+func upload(ctx context.Context, sdk *neon.Client, httpClient httpClient, contentType *string, body io.Reader,
+	projectID string, branchID string, bucket string, key string) (etag string, contentLength int64,
+	contentTypeResp string, err error) {
+	// set an arbitrary long expiration time to ensure that the large object can be uploaded
+	var expTime int64 = 3600
+	var presignResp neon.PresignResponse
+	if err := projectReadiness.Do(ctx, func(ctx context.Context) error {
+		var err error
+		presignResp, err = sdk.PresignProjectBranchBucketObject(
+			projectID, branchID, bucket, url.PathEscape(key), neon.PresignRequest{
+				ContentType:      contentType,
+				ExpiresInSeconds: &expTime,
+				Operation:        neon.PresignRequestOperationUpload,
+			})
 		return err
+	}, nil); err != nil {
+		return "", 0, "",
+			fmt.Errorf("unable to generate presign URL to upload to bucket %s/%s/%s: %w",
+				projectID, branchID, bucket, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, presigned.Method, presigned.URL, bytes.NewReader(content))
+
+	httpReq, err := http.NewRequestWithContext(ctx, presignResp.Method, presignResp.URL, body)
 	if err != nil {
-		return err
+		return "", 0, "", fmt.Errorf("unable to create HTTP request: %w", err)
 	}
-	for key, value := range presigned.Headers {
-		req.Header.Set(key, fmt.Sprint(value))
+
+	for k, v := range presignResp.Headers {
+		httpReq.Header.Set(k, fmt.Sprint(v))
 	}
-	res, err := http.DefaultClient.Do(req)
+
+	httpResp, err := httpClient.Do(httpReq)
+	defer func() { _ = httpResp.Body.Close() }()
 	if err != nil {
-		return err
+		return "", 0, "",
+			fmt.Errorf("unable to upload object %q to bucket %s/%s/%s: %w", key, projectID, branchID, bucket, err)
 	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-		return fmt.Errorf("presigned upload returned %s: %s", res.Status, strings.TrimSpace(string(body)))
+	if httpResp.StatusCode < 200 || httpResp.StatusCode > 299 {
+		respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		return "", 0, "",
+			fmt.Errorf("unable to upload object %q to bucket %s/%s/%s: HTTP %d, Resp: %s",
+				key, projectID, branchID, bucket, httpResp.StatusCode, respBody)
 	}
-	return nil
+
+	meta, err := readObjectHeaders(ctx, sdk, projectID, branchID, bucket, key)
+	if err != nil {
+		return "", 0, "",
+			fmt.Errorf("unable to read object metadata: %w", err)
+	}
+
+	return meta.Etag, meta.Size, httpReq.Header.Get("Content-Type"), nil
 }
 
-func (r *neonBucketObjectResource) refresh(ctx context.Context, model *neonBucketObjectResourceModel, objectKey string) error {
-	object, err := r.findObject(ctx, model, objectKey)
-	if err != nil {
-		return err
+func readObjectHeaders(ctx context.Context, sdk *neon.Client, projectID string, branchID string, bucket string,
+	key string) (neon.BucketObject, error) {
+	var cursor, prefix *string
+	prefixTmp := filepath.Dir(key)
+	if prefixTmp != "." {
+		prefix = &prefixTmp
 	}
-
-	cfg := neon.PresignRequest{Operation: neon.PresignRequestOperationDownload}
-	presigned, err := r.client.sdk.PresignProjectBranchBucketObject(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), encodedObjectKey(objectKey), cfg)
-	if err != nil {
-		return err
-	}
-	if etag := presignedHeader(presigned.Headers, "ETag"); etag != "" {
-		model.ETag = types.StringValue(etag)
-	} else {
-		model.ETag = types.StringValue(object.Etag)
-	}
-	if contentLength := presignedHeader(presigned.Headers, "Content-Length"); contentLength != "" {
-		value, err := strconv.ParseInt(contentLength, 10, 64)
-		if err != nil {
-			return fmt.Errorf("invalid Content-Length header %q: %w", contentLength, err)
-		}
-		model.ContentLength = types.Int64Value(value)
-	} else {
-		model.ContentLength = types.Int64Value(object.Size)
-	}
-	if contentType := presignedHeader(presigned.Headers, "Content-Type"); contentType != "" {
-		model.ContentType = types.StringValue(contentType)
-	} else {
-		model.ContentType = types.StringNull()
-	}
-	return nil
-}
-
-func presignedHeader(headers map[string]any, name string) string {
-	for header, value := range headers {
-		if strings.EqualFold(header, name) {
-			return fmt.Sprint(value)
-		}
-	}
-	return ""
-}
-
-var errBucketObjectNotFound = errors.New("bucket object not found")
-
-func (r *neonBucketObjectResource) findObject(ctx context.Context, model *neonBucketObjectResourceModel, objectKey string) (*neon.BucketObject, error) {
-	var cursor *string
 	for {
-		result, err := r.client.sdk.ListProjectBranchBucketObjects(model.ProjectID.ValueString(), model.BranchID.ValueString(), model.Bucket.ValueString(), nil, nil, cursor, nil)
-		if err != nil {
-			return nil, err
+		var resp neon.BucketObjectsListResponse
+		if err := projectReadiness.Do(ctx, func(_ context.Context) error {
+			var err error
+			resp, err = sdk.ListProjectBranchBucketObjects(projectID, branchID, bucket, prefix, nil, cursor,
+				nil)
+			return err
+		}, nil); err != nil {
+			return neon.BucketObject{}, err
 		}
-		for _, object := range result.Objects {
-			if object.Key == objectKey {
-				return &object, nil
+		for _, obj := range resp.Objects {
+			if key == obj.Key {
+				return obj, nil
 			}
 		}
-		if !result.IsTruncated || result.NextCursor == nil {
+		if !resp.IsTruncated || resp.NextCursor == nil {
 			break
 		}
-		cursor = result.NextCursor
+		cursor = resp.NextCursor
 	}
-	return nil, fmt.Errorf("%w: %q", errBucketObjectNotFound, objectKey)
+	return neon.BucketObject{}, objectNotFoundError{
+		key:       key,
+		projectID: projectID,
+		branchID:  branchID,
+		bucket:    bucket,
+	}
 }
 
-func bucketObjectInput(model neonBucketObjectResourceModel) (string, []byte, *string, error) {
-	inputs := 0
-	if !model.Content.IsNull() && !model.Content.IsUnknown() {
-		inputs++
-	}
-	if !model.ContentBase64.IsNull() && !model.ContentBase64.IsUnknown() {
-		inputs++
-	}
-	if !model.Source.IsNull() && !model.Source.IsUnknown() {
-		inputs++
-	}
-	if inputs > 1 {
-		return "", nil, nil, fmt.Errorf("only one of content, content_base64, or source may be set")
-	}
-	contentType := model.ContentType.ValueStringPointer()
-	if inputs == 0 {
-		return folderObjectKey(model.Key.ValueString()), []byte{}, contentType, nil
-	}
-	if !model.Content.IsNull() && !model.Content.IsUnknown() {
-		return model.Key.ValueString(), []byte(model.Content.ValueString()), contentType, nil
-	}
-	if !model.ContentBase64.IsNull() && !model.ContentBase64.IsUnknown() {
-		decoded, err := base64.StdEncoding.DecodeString(model.ContentBase64.ValueString())
-		return model.Key.ValueString(), decoded, contentType, err
-	}
-	content, err := os.ReadFile(model.Source.ValueString())
-	return model.Key.ValueString(), content, contentType, err
+type objectNotFoundError struct {
+	key       string
+	projectID string
+	branchID  string
+	bucket    string
 }
 
-func folderObjectKey(key string) string { return key + "/.emptyFolderPlaceholder" }
-
-func encodedObjectKey(key string) string { return url.PathEscape(key) }
-
-func bucketObjectID(projectID, branchID, bucket, key string) string {
-	return strings.Join([]string{projectID, branchID, bucket, key}, "/")
+func (o objectNotFoundError) Error() string {
+	return fmt.Sprintf("object %q not found in the projectID/branchID/bucket %s/%s/%s", o.key, o.projectID,
+		o.branchID, o.bucket)
 }
 
-func isNeonNotFound(err error) bool {
-	var neonErr neon.Error
-	return err != nil && errors.As(err, &neonErr) && neonErr.HTTPCode == http.StatusNotFound
+func folderObjectKey(key string) string {
+	return strings.TrimSuffix(key, "/") + "/.emptyFolderPlaceholder"
 }

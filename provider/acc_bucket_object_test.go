@@ -5,13 +5,16 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestBucketObject(t *testing.T) {
@@ -196,7 +199,6 @@ func TestBucketObject(t *testing.T) {
 	})
 
 	t.Run("creates objects from content, base64, and source", func(t *testing.T) {
-		t.Skip("todo")
 		content := "hello from content"
 		contentBase64 := base64.StdEncoding.EncodeToString([]byte("hello from base64"))
 		sourcePath := filepath.Join(t.TempDir(), "object.txt")
@@ -205,9 +207,9 @@ func TestBucketObject(t *testing.T) {
 		}
 
 		configs := []struct {
-			name  string
-			input string
-			want  int
+			name              string
+			input             string
+			wantContentLength int
 		}{
 			{"content", fmt.Sprintf("content = %q", content), len(content)},
 			{"content_base64", fmt.Sprintf("content_base64 = %q", contentBase64), len("hello from base64")},
@@ -219,12 +221,14 @@ func TestBucketObject(t *testing.T) {
 				resource.Test(t, resource.TestCase{
 					ProtoV6ProviderFactories: newProviderFactories(),
 					Steps: []resource.TestStep{{
-						Config: bucketObjectConfig(projectName, "object", tc.input),
+						Config: bucketObjectConfig(projectName, "object", tc.input+`
+content_type = "text/plain"`),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "object"),
-							resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", fmt.Sprint(tc.want)),
+							resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", fmt.Sprint(tc.wantContentLength)),
 							resource.TestCheckResourceAttr("neon_bucket_object.this", "content_type", "text/plain"),
 							resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", nonEmptyAttribute("etag")),
+							resource.TestCheckResourceAttrWith("neon_bucket_object.this", "trigger", nonEmptyAttribute("trigger")),
 						),
 					}},
 				})
@@ -232,31 +236,59 @@ func TestBucketObject(t *testing.T) {
 		}
 	})
 
-	t.Run("creates a folder placeholder when content is omitted", func(t *testing.T) {
-		t.Skip("todo")
+	t.Run("creates a folder", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{{
-				Config: bucketObjectConfig(newProjectName(projectNamePrefix), "folder", ""),
-				Check:  resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "folder"),
+				Config: bucketObjectConfig(newProjectName(projectNamePrefix), "folder", "is_directory = true"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "folder"),
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "0"),
+					resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", nonEmptyAttribute("etag")),
+					resource.TestCheckNoResourceAttr("neon_bucket_object.this", "trigger"),
+					resource.TestCheckNoResourceAttr("neon_bucket_object.this", "content_type"),
+				),
 			}},
 		})
 	})
 
-	t.Run("deletes an object", func(t *testing.T) {
-		t.Skip("todo")
+	t.Run("deletes an object deleted outside terraform", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
+		config := bucketObjectConfig(projectName, "delete-me", `content = "delete me"`)
+		var projectID, branchID string
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
-				{Config: bucketObjectConfig(projectName, "delete-me", `content = "delete me"`)},
-				{Config: bucketObjectConfig(projectName, "delete-me", `content = "delete me"`), Destroy: true},
+				{
+					Config: config,
+					Check: func(s *terraform.State) error {
+						o, ok := s.RootModule().Resources["neon_bucket_object.this"]
+						assert.True(t, ok, "resource neon_bucket_object.this must be present")
+						projectID = o.Primary.Attributes["project_id"]
+						branchID = o.Primary.Attributes["branch_id"]
+						return nil
+					},
+				},
+				{
+					PreConfig: func() {
+						if err := client.DeleteProjectBranchBucketObject(projectID, branchID, "objects",
+							"delete-me"); err != nil {
+							panic(err)
+						}
+					},
+					Destroy: true,
+					Config:  config,
+					Check: func(s *terraform.State) error {
+						_, ok := s.RootModule().Resources["neon_bucket_object.this"]
+						assert.False(t, ok, "resource neon_bucket_object.this must be destroyed")
+						return nil
+					},
+				},
 			},
 		})
 	})
 
 	t.Run("renames an object", func(t *testing.T) {
-		t.Skip("todo")
 		projectName := newProjectName(projectNamePrefix)
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: newProviderFactories(),
@@ -268,7 +300,6 @@ func TestBucketObject(t *testing.T) {
 	})
 
 	t.Run("updates object content", func(t *testing.T) {
-		t.Skip("todo")
 		projectName := newProjectName(projectNamePrefix)
 		var oldETag string
 		resource.Test(t, resource.TestCase{
@@ -289,9 +320,9 @@ func TestBucketObject(t *testing.T) {
 	})
 
 	t.Run("imports an object", func(t *testing.T) {
-		t.Skip("todo")
 		projectName := newProjectName(projectNamePrefix)
-		projectID, branchID, err := createBucketObjectFixture(t, client, projectName, "import me.txt", []byte("imported"), "text/plain")
+		projectID, branchID, err := createBucketObjectFixture(t, client, projectName, "import me.txt",
+			[]byte("imported"), "text/plain")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -307,8 +338,74 @@ func TestBucketObject(t *testing.T) {
 `, projectID, branchID),
 				ImportState: true, ResourceName: "neon_bucket_object.this",
 				ImportStateId: fmt.Sprintf("%s/%s/objects/import me.txt", projectID, branchID),
-				Check:         resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "8"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "8"),
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "content_type", "text/plain"),
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "is_directory", "false"),
+					resource.TestCheckNoResourceAttr("neon_bucket_object.this", "content"),
+					resource.TestCheckNoResourceAttr("neon_bucket_object.this", "content_base64"),
+					resource.TestCheckNoResourceAttr("neon_bucket_object.this", "source"),
+				),
 			}},
+		})
+	})
+
+	t.Run("creates an empty string object from content", func(t *testing.T) {
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: bucketObjectConfig(newProjectName(projectNamePrefix), "empty obj", "content = \"\""),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "empty obj"),
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "0"),
+					resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", nonEmptyAttribute("etag")),
+					resource.TestCheckResourceAttrWith("neon_bucket_object.this", "trigger", nonEmptyAttribute("trigger")),
+				),
+			}},
+		})
+	})
+
+	t.Run("updates an object provided by source when trigger is updated", func(t *testing.T) {
+		sourcePath := filepath.Join(t.TempDir(), "object.txt")
+		if err := os.WriteFile(sourcePath, []byte("foo"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: bucketObjectConfig(projectName, "obj", fmt.Sprintf(`source = %q`, sourcePath)),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "obj"),
+						resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "3"),
+						resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", nonEmptyAttribute("etag")),
+						resource.TestCheckResourceAttrWith("neon_bucket_object.this", "trigger", nonEmptyAttribute("trigger")),
+					),
+				},
+				{
+					Config:   bucketObjectConfig(projectName, "obj", fmt.Sprintf(`source = %q`, sourcePath)),
+					PlanOnly: true,
+				},
+				{
+					Config: bucketObjectConfig(projectName, "obj", fmt.Sprintf(`source = %q
+trigger = "foo"`, sourcePath)),
+					PlanOnly:           true,
+					ExpectNonEmptyPlan: true,
+				},
+				{
+					PreConfig: func() {
+						if err := os.WriteFile(sourcePath, []byte("foobar"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					},
+					Config: bucketObjectConfig(projectName, "obj", fmt.Sprintf(`source = %q
+trigger = "foo"`, sourcePath)),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "6"),
+					),
+				},
+			},
 		})
 	})
 }
@@ -330,7 +427,6 @@ resource "neon_bucket_object" "this" {
   branch_id   = neon_project.this.default_branch_id
   bucket      = neon_bucket.this.name
   key         = %q
-  content_type = "text/plain"
   %s
 }
 `, projectName, key, input)
@@ -361,11 +457,11 @@ func createBucketObjectFixture(t *testing.T, client *neon.Client, projectName, k
 	if _, err = client.CreateProjectBranchBucket(projectID, branchID, neon.BucketCreateRequest{Name: "objects"}); err != nil {
 		return "", "", err
 	}
-	presigned, err := client.PresignProjectBranchBucketObject(projectID, branchID, "objects", encodedObjectKey(key), neon.PresignRequest{Operation: neon.PresignRequestOperationUpload, ContentType: &contentType})
+	presigned, err := client.PresignProjectBranchBucketObject(projectID, branchID, "objects", url.PathEscape(key), neon.PresignRequest{Operation: neon.PresignRequestOperationUpload, ContentType: &contentType})
 	if err != nil {
 		return "", "", err
 	}
-	req, err := http.NewRequest(http.MethodPut, presigned.URL, bytes.NewReader(content))
+	req, err := http.NewRequest(presigned.Method, presigned.URL, bytes.NewReader(content))
 	if err != nil {
 		return "", "", err
 	}

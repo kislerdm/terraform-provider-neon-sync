@@ -50,8 +50,8 @@ func (r *delay) Retry(
 	return diag.FromErr(err)
 }
 
-// TODO: refactor ctx to be the arg 0
-func (r *delay) RetryFramework(fn func(context.Context) error, ctx context.Context) frameworkdiag.Diagnostics {
+func (r *delay) Do(ctx context.Context, fn func(context.Context) error,
+	fallbacks map[int]func(context.Context) error) error {
 	var i uint8
 	var err error
 	for i < r.maxCnt {
@@ -71,56 +71,32 @@ func (r *delay) RetryFramework(fn func(context.Context) error, ctx context.Conte
 				i++
 				select {
 				case <-ctx.Done():
-					return frameworkDiagnostics(ctx.Err())
-				case <-time.After(r.delay):
-				}
-			default:
-				return frameworkDiagnostics(e)
-			}
-		default:
-			return frameworkDiagnostics(e)
-		}
-	}
-	return frameworkDiagnostics(err)
-}
-
-// TODO: refactor ctx to be the arg 0
-func (r *delay) RetryWithFallbackFramework(fn func(context.Context) error, ctx context.Context,
-	fallbacks map[int]func(context.Context) error) frameworkdiag.Diagnostics {
-	var i uint8
-	var err error
-	for i < r.maxCnt {
-		tflog.Debug(ctx, "API call attempt "+strconv.Itoa(int(i)))
-
-		switch e := fn(ctx).(type) {
-		case nil:
-			return nil
-		case neon.Error:
-			tflog.Debug(ctx, "API call error code: "+strconv.Itoa(e.HTTPCode))
-			switch e.HTTPCode {
-			case 200:
-				return nil
-			case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusLocked:
-				tflog.Debug(ctx, "API call delay "+strconv.FormatInt(r.delay.Milliseconds(), 10)+" ms.")
-				err = e
-				i++
-				select {
-				case <-ctx.Done():
-					return frameworkDiagnostics(ctx.Err())
+					return ctx.Err()
 				case <-time.After(r.delay):
 				}
 			default:
 				if fallback, ok := fallbacks[e.HTTPCode]; ok {
 					tflog.Debug(ctx, "API call fallback for error code: "+strconv.Itoa(e.HTTPCode))
-					return r.RetryFramework(fallback, ctx)
+					return r.Do(ctx, fallback, nil)
 				}
-				return frameworkDiagnostics(e)
+				return e
 			}
 		default:
-			return frameworkDiagnostics(e)
+			return e
 		}
 	}
-	return frameworkDiagnostics(err)
+	return err
+}
+
+// TODO: refactor ctx to be the arg 0
+func (r *delay) RetryFramework(fn func(context.Context) error, ctx context.Context) frameworkdiag.Diagnostics {
+	return frameworkDiagnostics(r.Do(ctx, fn, nil))
+}
+
+// TODO: refactor ctx to be the arg 0
+func (r *delay) RetryWithFallbackFramework(fn func(context.Context) error, ctx context.Context,
+	fallbacks map[int]func(context.Context) error) frameworkdiag.Diagnostics {
+	return frameworkDiagnostics(r.Do(ctx, fn, fallbacks))
 }
 
 func frameworkDiagnostics(err error) frameworkdiag.Diagnostics {
