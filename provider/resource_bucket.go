@@ -121,16 +121,21 @@ func (r *neonBucketResource) Configure(_ context.Context, req resource.Configure
 		return
 	}
 
-	client, ok := req.ProviderData.(*neon.Client)
+	client, ok := req.ProviderData.(*providerAdapter)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neon.Client, got an unexpected type.",
+			"Expected *providerAdapter, got an unexpected type.",
 		)
 		return
 	}
 
-	r.client = client
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
+	}
+
+	r.client = client.sdk
 }
 
 func (r *neonBucketResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {

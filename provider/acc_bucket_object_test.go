@@ -1,0 +1,384 @@
+package provider
+
+import (
+	"bytes"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	neon "github.com/kislerdm/neon-sdk-go"
+)
+
+func TestBucketObject(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectNamePrefix := "bucketObject"
+	t.Cleanup(func() {
+		projects, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		for _, project := range projects.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	t.Run("shall fail plan: content, content_base64, source, is_directory are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id     = "foo"
+  branch_id      = "br"
+  bucket         = "foo"
+  key            = "foo"
+  content        = "foo"
+  content_base64 = "foo"
+  source         = "foo"
+  is_directory   = true
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content, content_base64, source are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id     = "foo"
+  branch_id      = "br"
+  bucket         = "foo"
+  key            = "foo"
+  content        = "foo"
+  content_base64 = "foo"
+  source         = "foo"
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content, content_base64 are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id     = "foo"
+  branch_id      = "br"
+  bucket         = "foo"
+  key            = "foo"
+  content        = "foo"
+  content_base64 = "foo"
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content, source are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id = "foo"
+  branch_id  = "br"
+  bucket     = "foo"
+  key        = "foo"
+  content    = "foo"
+  source     = "foo"
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content_base64, source are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id     = "foo"
+  branch_id      = "br"
+  bucket         = "foo"
+  key            = "foo"
+  content_base64 = "foo"
+  source         = "foo"
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content and is_directory are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id   = "foo"
+  branch_id    = "br"
+  bucket       = "foo"
+  key          = "foo"
+  content      = "foo"
+  is_directory = true
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: content_base64 and is_directory are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id   = "foo"
+  branch_id    = "br"
+  bucket       = "foo"
+  key          = "foo"
+  content_base64 = "foo"
+  is_directory = true
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: source and is_directory are set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id   = "foo"
+  branch_id    = "br"
+  bucket       = "foo"
+  key          = "foo"
+  source       = "foo"
+  is_directory = true
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("shall fail plan: neither of content, content_base64, source, or is_directory is set", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: `resource "neon_bucket_object" "this" {
+  project_id   = "foo"
+  branch_id    = "br"
+  bucket       = "foo"
+  key          = "foo"
+}`,
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile("conflicting configuration"),
+			}},
+		})
+	})
+
+	t.Run("creates objects from content, base64, and source", func(t *testing.T) {
+		t.Skip("todo")
+		content := "hello from content"
+		contentBase64 := base64.StdEncoding.EncodeToString([]byte("hello from base64"))
+		sourcePath := filepath.Join(t.TempDir(), "object.txt")
+		if err := os.WriteFile(sourcePath, []byte("hello from source"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		configs := []struct {
+			name  string
+			input string
+			want  int
+		}{
+			{"content", fmt.Sprintf("content = %q", content), len(content)},
+			{"content_base64", fmt.Sprintf("content_base64 = %q", contentBase64), len("hello from base64")},
+			{"source", fmt.Sprintf("source = %q", sourcePath), len("hello from source")},
+		}
+		for _, tc := range configs {
+			t.Run(tc.name, func(t *testing.T) {
+				projectName := newProjectName(projectNamePrefix)
+				resource.Test(t, resource.TestCase{
+					ProtoV6ProviderFactories: newProviderFactories(),
+					Steps: []resource.TestStep{{
+						Config: bucketObjectConfig(projectName, "object", tc.input),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "object"),
+							resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", fmt.Sprint(tc.want)),
+							resource.TestCheckResourceAttr("neon_bucket_object.this", "content_type", "text/plain"),
+							resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", nonEmptyAttribute("etag")),
+						),
+					}},
+				})
+			})
+		}
+	})
+
+	t.Run("creates a folder placeholder when content is omitted", func(t *testing.T) {
+		t.Skip("todo")
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: bucketObjectConfig(newProjectName(projectNamePrefix), "folder", ""),
+				Check:  resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "folder"),
+			}},
+		})
+	})
+
+	t.Run("deletes an object", func(t *testing.T) {
+		t.Skip("todo")
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{Config: bucketObjectConfig(projectName, "delete-me", `content = "delete me"`)},
+				{Config: bucketObjectConfig(projectName, "delete-me", `content = "delete me"`), Destroy: true},
+			},
+		})
+	})
+
+	t.Run("renames an object", func(t *testing.T) {
+		t.Skip("todo")
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{Config: bucketObjectConfig(projectName, "before.txt", `content = "rename me"`)},
+				{Config: bucketObjectConfig(projectName, "after.txt", `content = "rename me"`), Check: resource.TestCheckResourceAttr("neon_bucket_object.this", "key", "after.txt")},
+			},
+		})
+	})
+
+	t.Run("updates object content", func(t *testing.T) {
+		t.Skip("todo")
+		projectName := newProjectName(projectNamePrefix)
+		var oldETag string
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{Config: bucketObjectConfig(projectName, "mutable.txt", `content = "first"`), Check: resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", func(value string) error { oldETag = value; return nil })},
+				{Config: bucketObjectConfig(projectName, "mutable.txt", `content = "second"`), Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "6"),
+					resource.TestCheckResourceAttrWith("neon_bucket_object.this", "etag", func(value string) error {
+						if value == oldETag {
+							return fmt.Errorf("etag did not change")
+						}
+						return nil
+					}),
+				)},
+			},
+		})
+	})
+
+	t.Run("imports an object", func(t *testing.T) {
+		t.Skip("todo")
+		projectName := newProjectName(projectNamePrefix)
+		projectID, branchID, err := createBucketObjectFixture(t, client, projectName, "import me.txt", []byte("imported"), "text/plain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: fmt.Sprintf(`resource "neon_bucket_object" "this" {
+  project_id = %q
+  branch_id  = %q
+  bucket     = "objects"
+  key        = "import me.txt"
+}
+`, projectID, branchID),
+				ImportState: true, ResourceName: "neon_bucket_object.this",
+				ImportStateId: fmt.Sprintf("%s/%s/objects/import me.txt", projectID, branchID),
+				Check:         resource.TestCheckResourceAttr("neon_bucket_object.this", "content_length", "8"),
+			}},
+		})
+	})
+}
+
+func bucketObjectConfig(projectName, key, input string) string {
+	return fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_bucket" "this" {
+  project_id = neon_project.this.id
+  branch_id  = neon_project.this.default_branch_id
+  name       = "objects"
+}
+
+resource "neon_bucket_object" "this" {
+  project_id  = neon_project.this.id
+  branch_id   = neon_project.this.default_branch_id
+  bucket      = neon_bucket.this.name
+  key         = %q
+  content_type = "text/plain"
+  %s
+}
+`, projectName, key, input)
+}
+
+func nonEmptyAttribute(name string) func(string) error {
+	return func(value string) error {
+		if value == "" {
+			return fmt.Errorf("expected %s to be set", name)
+		}
+		return nil
+	}
+}
+
+func createBucketObjectFixture(t *testing.T, client *neon.Client, projectName, key string, content []byte, contentType string) (string, string, error) {
+	t.Helper()
+	created, err := client.CreateProject(neon.ProjectCreateRequest{Project: neon.ProjectCreateRequestProject{Name: &projectName, RegionID: pointer("aws-us-east-2")}})
+	if err != nil {
+		return "", "", err
+	}
+	projectID := created.Project.ID
+	sleepDuringRunningOperations(t, client, projectID)
+	branches, err := client.ListProjectBranches(projectID, nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		return "", "", err
+	}
+	branchID := branches.Branches[0].ID
+	if _, err = client.CreateProjectBranchBucket(projectID, branchID, neon.BucketCreateRequest{Name: "objects"}); err != nil {
+		return "", "", err
+	}
+	presigned, err := client.PresignProjectBranchBucketObject(projectID, branchID, "objects", encodedObjectKey(key), neon.PresignRequest{Operation: neon.PresignRequestOperationUpload, ContentType: &contentType})
+	if err != nil {
+		return "", "", err
+	}
+	req, err := http.NewRequest(http.MethodPut, presigned.URL, bytes.NewReader(content))
+	if err != nil {
+		return "", "", err
+	}
+	for key, value := range presigned.Headers {
+		req.Header.Set(key, fmt.Sprint(value))
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return "", "", fmt.Errorf("upload returned %s", res.Status)
+	}
+	return projectID, branchID, nil
+}

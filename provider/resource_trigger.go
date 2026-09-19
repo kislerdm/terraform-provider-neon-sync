@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -38,7 +37,6 @@ type neonTriggerResourceModel struct {
 	StorageObjectCreated *storageObjectCreatedModel `tfsdk:"storage_object_created"`
 	TriggerID            types.String               `tfsdk:"trigger_id"`
 	Version              types.Int64                `tfsdk:"version"`
-	SourceBranchID       types.String               `tfsdk:"source_branch_id"`
 	NextRunAt            types.String               `tfsdk:"next_run_at"`
 	Inherited            types.Bool                 `tfsdk:"inherited"`
 }
@@ -89,7 +87,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"function_slug": schema.StringAttribute{
 				Required:    true,
-				Validators:  []validator.String{triggerSlugValidator{}},
 				Description: "The branch-local Function slug resolved when an occurrence is consumed.",
 			},
 			"function_path": schema.StringAttribute{
@@ -107,7 +104,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Attributes: map[string]schema.Attribute{
 					"cron": schema.StringAttribute{
 						Required:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 1, max: 1024}},
 						Description: "Numeric five-field cron expression (minute through day-of-week), interpreted in UTC.",
 					},
 				},
@@ -117,12 +113,10 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Attributes: map[string]schema.Attribute{
 					"bucket_name": schema.StringAttribute{
 						Required:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 3, max: 63}},
 						Description: "The exact object-storage bucket name to watch.",
 					},
 					"prefix": schema.StringAttribute{
 						Optional:    true,
-						Validators:  []validator.String{stringLengthBetweenValidator{min: 1, max: 1024}},
 						Description: "Optional object-key prefix. Max 1024 UTF-8 bytes.",
 					},
 				},
@@ -134,10 +128,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"version": schema.Int64Attribute{
 				Computed:    true,
 				Description: "Monotonic configuration version.",
-			},
-			"source_branch_id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Public branch_id of the branch that authored the effective configuration.",
 			},
 			"next_run_at": schema.StringAttribute{
 				Computed:    true,
@@ -204,15 +194,21 @@ func (r *neonTriggerResource) Configure(_ context.Context, req resource.Configur
 	if req.ProviderData == nil {
 		return
 	}
-	client, ok := req.ProviderData.(*neon.Client)
+	client, ok := req.ProviderData.(*providerAdapter)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neon.Client, got an unexpected type.",
+			"Expected *providerAdapter, got an unexpected type.",
 		)
 		return
 	}
-	r.client = client
+
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
+	}
+
+	r.client = client.sdk
 }
 
 func (r *neonTriggerResource) ImportState(_ context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -359,10 +355,17 @@ func (r *neonTriggerResource) Delete(ctx context.Context, req resource.DeleteReq
 			return nil
 		},
 	})...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.State.RemoveResource(ctx)
 }
 
 func buildTriggerCreateRequest(plan *neonTriggerResourceModel) neon.TriggerCreateRequest {
-	cfg := neon.TriggerCreateRequest{}
+	cfg := neon.TriggerCreateRequest{
+		Type: plan.Type.ValueString(),
+	}
 
 	typ := plan.Type.ValueString()
 	switch typ {
@@ -495,7 +498,6 @@ func setNeonTriggerModelFromSchedule(model *neonTriggerResourceModel, st neon.Sc
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	model.SourceBranchID = types.StringValue(st.SourceBranchID)
 	if st.NextRunAt != "" {
 		model.NextRunAt = types.StringValue(st.NextRunAt)
 	} else {
@@ -517,7 +519,6 @@ func setNeonTriggerModelFromStorage(model *neonTriggerResourceModel, st neon.Sto
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	model.SourceBranchID = types.StringValue(st.SourceBranchID)
 	model.NextRunAt = types.StringNull()
 	soc := &storageObjectCreatedModel{
 		BucketName: types.StringValue(st.StorageObjectCreated.BucketName),
@@ -557,55 +558,4 @@ func (triggerTypeValidator) ValidateString(_ context.Context, req validator.Stri
 		"Invalid trigger type",
 		fmt.Sprintf("%q is not a valid trigger type; expected `schedule` or `storage_object_created`.", s),
 	)
-}
-
-type triggerSlugValidator struct{}
-
-func (triggerSlugValidator) Description(_ context.Context) string {
-	return "function_slug must match ^[a-z0-9]{1,20}$"
-}
-
-func (v triggerSlugValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-var triggerSlugPattern = regexp.MustCompile(`^[a-z0-9]{1,20}$`)
-
-func (triggerSlugValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	if !triggerSlugPattern.MatchString(req.ConfigValue.ValueString()) {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid function_slug",
-			"function_slug must match ^[a-z0-9]{1,20}$",
-		)
-	}
-}
-
-type stringLengthBetweenValidator struct {
-	min, max int
-}
-
-func (v stringLengthBetweenValidator) Description(_ context.Context) string {
-	return fmt.Sprintf("string length must be between %d and %d", v.min, v.max)
-}
-
-func (v stringLengthBetweenValidator) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-func (v stringLengthBetweenValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-	n := len(req.ConfigValue.ValueString())
-	if n < v.min || n > v.max {
-		resp.Diagnostics.AddAttributeError(
-			req.Path,
-			"Invalid length",
-			fmt.Sprintf("length must be between %d and %d, got %d", v.min, v.max, n),
-		)
-	}
 }

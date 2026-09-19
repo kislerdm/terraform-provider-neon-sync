@@ -129,16 +129,21 @@ func (r *branchBackupScheduleResource) Configure(_ context.Context, req resource
 		return
 	}
 
-	client, ok := req.ProviderData.(*neon.Client)
+	client, ok := req.ProviderData.(*providerAdapter)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Resource Configure Type",
-			"Expected *neon.Client, got an unexpected type.",
+			"Expected *providerAdapter, got an unexpected type.",
 		)
 		return
 	}
 
-	r.client = client
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
+	}
+
+	r.client = client.sdk
 }
 
 func (r *branchBackupScheduleResource) ImportState(ctx context.Context, req resource.ImportStateRequest,
