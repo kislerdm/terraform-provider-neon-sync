@@ -14,30 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newEndpointConfig(projectName, endpointType string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" { name = %q }
-resource "neon_endpoint" "this" {
-	project_id = neon_project.this.id
-	branch_id  = neon_project.this.default_branch_id
-	type       = %q
-}`, projectName, endpointType)
-}
-
-func newNamedEndpointConfig(projectName, endpointType, projectNameCompute, endpointName string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" {
-	name = %q
-	primary_compute {
-		name = %q
-	}
-}
-resource "neon_endpoint" "this" {
-	project_id = neon_project.this.id
-	branch_id  = neon_project.this.default_branch_id
-	type       = %q
-	name       = %q
-}`, projectName, projectNameCompute, endpointType, endpointName)
-}
-
 func TestRecreateEndpointIfNotFound(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -91,7 +67,14 @@ func TestRecreateEndpointIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: newEndpointConfig(projectName, endpointTypeReadOnly.String()),
+						Config: fmt.Sprintf(`
+							resource "neon_project" "this" { name = "%s" }
+							resource "neon_endpoint" "this" {
+								project_id = neon_project.this.id
+								branch_id  = neon_project.this.default_branch_id
+								type       = "%s"
+							}
+						`, projectName, endpointTypeReadOnly),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_endpoint.this",
@@ -112,7 +95,12 @@ func TestRecreateEndpointIfNotFound(t *testing.T) {
 
 	t.Run("shall destroy even if the endpoint was deleted outside of terraform", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := newEndpointConfig(projectName, endpointTypeReadOnly.String())
+		config := fmt.Sprintf(`resource "neon_project" "this" { name = "%s" }
+resource "neon_endpoint" "this" {
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+	type       = "%s"
+}`, projectName, endpointTypeReadOnly)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -151,28 +139,30 @@ func TestRecreateEndpointIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: newEndpointConfig(projectName, endpointTypeReadOnly.String()) + `
-
-resource "neon_endpoint" "this" {
-	project_id = neon_project.this.id
-	branch_id  = neon_project.this.default_branch_id
-	type       = "read_only"
-	disabled   = false
-}`,
+						Config: fmt.Sprintf(`
+							resource "neon_project" "this" { name = "%s" }
+							resource "neon_endpoint" "this" {
+								project_id = neon_project.this.id
+								branch_id  = neon_project.this.default_branch_id
+								type       = "%s"
+								disabled   = false
+							}
+						`, projectName, endpointTypeReadOnly),
 						Check: resource.TestCheckResourceAttr(
 							"neon_endpoint.this",
 							"disabled", "false",
 						),
 					},
 					{
-						Config: newEndpointConfig(projectName, endpointTypeReadOnly.String()) + `
-
-resource "neon_endpoint" "this" {
-	project_id = neon_project.this.id
-	branch_id  = neon_project.this.default_branch_id
-	type       = "read_only"
-	disabled   = true
-}`,
+						Config: fmt.Sprintf(`
+							resource "neon_project" "this" { name = "%s" }
+							resource "neon_endpoint" "this" {
+								project_id = neon_project.this.id
+								branch_id  = neon_project.this.default_branch_id
+								type       = "%s"
+								disabled   = true
+							}
+						`, projectName, endpointTypeReadOnly),
 						PreConfig: func() {
 							preConfig(projectName)
 						},
@@ -181,9 +171,24 @@ resource "neon_endpoint" "this" {
 								"neon_endpoint.this",
 								"disabled", "true",
 							),
-							func(state *terraform.State) error {
-								endpoint := state.RootModule().Resources["neon_endpoint.this"]
-								assert.Equal(t, "true", endpoint.Primary.Attributes["disabled"])
+							func(_ *terraform.State) error {
+								ref, err := readProjectInfo(client, projectName)
+								if err != nil {
+									return err
+								}
+
+								resp, err := client.ListProjectEndpoints(ref.ID)
+								if err != nil {
+									return err
+								}
+								assert.Len(t, resp.Endpoints, 2,
+									"2 endpoints are expected after recreation")
+								for _, endpoint := range resp.Endpoints {
+									if endpoint.Type == endpointTypeReadOnly {
+										assert.True(t, endpoint.Disabled,
+											"endpoint should be disabled after recreation")
+									}
+								}
 								return nil
 							},
 						),
@@ -194,7 +199,14 @@ resource "neon_endpoint" "this" {
 
 	t.Run("shall fail to import endpoint if it was deleted", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := newEndpointConfig(projectName, endpointTypeReadOnly.String())
+		config := fmt.Sprintf(`
+			resource "neon_project" "this" { name = "%s" }
+			resource "neon_endpoint" "this" {
+				project_id = neon_project.this.id
+				branch_id  = neon_project.this.default_branch_id
+				type       = "%s"
+			}
+		`, projectName, endpointTypeReadOnly)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -211,31 +223,34 @@ resource "neon_endpoint" "this" {
 						ImportState:  true,
 						ResourceName: "neon_endpoint.this",
 						ImportStateIdFunc: func(s *terraform.State) (string, error) {
-							project, ok := s.RootModule().Resources["neon_project.this"]
-							if !ok {
-								return "", fmt.Errorf("resource neon_project.this not found in state")
-							}
-							endpoint, ok := s.RootModule().Resources["neon_endpoint.this"]
-							if !ok {
-								return "", fmt.Errorf("resource neon_endpoint.this not found in state")
-							}
-							projectID := project.Primary.ID
-							endpointID := endpoint.Primary.ID
-							if projectID == "" || endpointID == "" {
-								return "", fmt.Errorf("state is missing project or endpoint ID")
-							}
-							op, err := client.DeleteProjectEndpoint(projectID, endpointID)
+							ref, err := readProjectInfo(client, projectName)
 							if err != nil {
 								return "", err
 							}
-							waitUnfinishedOperations(context.TODO(), client, op.OperationsResponse.Operations)
-							return fmt.Sprintf("%s/%s", projectID, endpointID), nil
+
+							resp, err := client.ListProjectEndpoints(ref.ID)
+							if err != nil {
+								return "", err
+							}
+							var endpointID string
+							for _, endpoint := range resp.Endpoints {
+								if endpoint.Type == endpointTypeReadOnly {
+									endpointID = endpoint.ID
+									op, err := client.DeleteProjectEndpoint(ref.ID, endpointID)
+									if err != nil {
+										return "", err
+									}
+									waitUnfinishedOperations(context.TODO(), client, op.OperationsResponse.Operations)
+								}
+							}
+
+							return fmt.Sprintf("%s/%s", ref.ID, endpointID), nil
 						},
 						ExpectError: regexp.MustCompile("404"),
 					},
 					// to avoid dangling resources on post-test destroy
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" { name = %q }`, projectName),
+						Config: fmt.Sprintf(`resource "neon_project" "this" { name = "%s" }`, projectName),
 					},
 				},
 			})
@@ -271,7 +286,20 @@ func TestEndpointName(t *testing.T) {
 			},
 			Steps: []resource.TestStep{
 				{
-					Config: newNamedEndpointConfig(projectName, "read_only", "foo", "bar"),
+					Config: fmt.Sprintf(`
+		resource "neon_project" "this" { 
+			name = "%s"
+			primary_compute {
+				name = "foo"
+			}
+		}
+		resource "neon_endpoint" "this" {
+			project_id = neon_project.this.id
+			branch_id  = neon_project.this.default_branch_id
+			type       = "read_only"
+			name       = "bar"
+		}
+	`, projectName),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttr(
 							"neon_project.this",
@@ -281,20 +309,68 @@ func TestEndpointName(t *testing.T) {
 							"neon_endpoint.this",
 							"name", "bar",
 						),
-						func(state *terraform.State) error {
-							project := state.RootModule().Resources["neon_project.this"]
-							endpoint := state.RootModule().Resources["neon_endpoint.this"]
-							assert.Equal(t, project.Primary.ID, endpoint.Primary.Attributes["project_id"])
-							assert.Equal(t, "bar", endpoint.Primary.Attributes["name"])
+						func(_ *terraform.State) error {
+							ref, err := readProjectInfo(client, projectName)
+							if err != nil {
+								return err
+							}
+
+							resp, err := client.ListProjectEndpoints(ref.ID)
+							if err != nil {
+								return err
+							}
+							for _, endpoint := range resp.Endpoints {
+								switch endpoint.Type {
+								case neon.EndpointTypeReadWrite:
+									if endpoint.Name == nil || *endpoint.Name != "foo" {
+										return fmt.Errorf("expected endpoint name 'foo', got '%v'", endpoint.Name)
+									}
+
+								case neon.EndpointTypeReadOnly:
+									if endpoint.Name == nil || *endpoint.Name != "bar" {
+										return fmt.Errorf("expected endpoint name 'bar', got '%v'", endpoint.Name)
+									}
+								}
+							}
+
 							return nil
 						},
 					),
 				},
 				{
-					Config: newEndpointConfig(projectName, "read_only"),
-					Check: func(state *terraform.State) error {
-						endpoint := state.RootModule().Resources["neon_endpoint.this"]
-						assert.Equal(t, "", endpoint.Primary.Attributes["name"])
+					Config: fmt.Sprintf(`
+		resource "neon_project" "this" { 
+			name = "%s"
+		}
+		resource "neon_endpoint" "this" {
+			project_id = neon_project.this.id
+			branch_id  = neon_project.this.default_branch_id
+			type       = "read_only"
+		}
+	`, projectName),
+					Check: func(_ *terraform.State) error {
+						ref, err := readProjectInfo(client, projectName)
+						if err != nil {
+							return err
+						}
+
+						resp, err := client.ListProjectEndpoints(ref.ID)
+						if err != nil {
+							return err
+						}
+						for _, endpoint := range resp.Endpoints {
+							switch endpoint.Type {
+							case neon.EndpointTypeReadWrite:
+								if endpoint.Name == nil || *endpoint.Name != "foo" {
+									return fmt.Errorf("expected endpoint name 'foo', got '%v'", endpoint.Name)
+								}
+
+							case neon.EndpointTypeReadOnly:
+								if endpoint.Name == nil || *endpoint.Name != "bar" {
+									return fmt.Errorf("expected endpoint name 'bar', got '%v'", endpoint.Name)
+								}
+							}
+						}
 						return nil
 					},
 				},

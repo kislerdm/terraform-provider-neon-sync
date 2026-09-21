@@ -14,45 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newFunctionConfig(projectName, functionName, zipPath string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" {
-  name      = %q
-  region_id = "aws-us-east-2"
-}
-
-resource "neon_function" "this" {
-  project_id    = neon_project.this.id
-  branch_id     = neon_project.this.default_branch_id
-  slug          = "hello"
-  runtime       = "nodejs24"
-  name          = %q
-  zip_file_path = %q
-}
-`, projectName, functionName, zipPath)
-}
-
-func newFunctionEnvironmentConfig(projectName, zipPath string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" {
-  name      = %q
-  region_id = "aws-us-east-2"
-}
-
-resource "neon_function" "this" {
-  project_id    = neon_project.this.id
-  branch_id     = neon_project.this.default_branch_id
-  slug          = "hello"
-  runtime       = "nodejs24"
-  name          = "hello"
-  zip_file_path = %q
-
-  environment_variables = {
-    FOO = 1
-    BAR = "baz"
-  }
-}
-`, projectName, zipPath)
-}
-
 func TestFunction(t *testing.T) {
 	if os.Getenv("TF_ACC") != "1" {
 		t.Skip("TF_ACC must be set to 1")
@@ -77,6 +38,23 @@ func TestFunction(t *testing.T) {
 	zipPath := filepath.Join(wd, "testdata/function/function.zip")
 
 	t.Run("shall create a function and update its name in place", func(t *testing.T) {
+		var newFunctionConfig = func(projectName string, functionName string) string {
+			return fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_function" "this" {
+  project_id    = neon_project.this.id
+  branch_id     = neon_project.this.default_branch_id
+  slug          = "hello"
+  runtime       = "nodejs24"
+  name          = %q
+  zip_file_path = %q
+}
+`, projectName, functionName, zipPath)
+		}
+
 		projectName := newProjectName(projectNamePrefix)
 
 		resource.Test(
@@ -84,26 +62,29 @@ func TestFunction(t *testing.T) {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: newFunctionConfig(projectName, "hello", zipPath),
+						Config: newFunctionConfig(projectName, "hello"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_function.this", "slug", "hello"),
 							resource.TestCheckResourceAttr("neon_function.this", "runtime", "nodejs24"),
 							resource.TestCheckResourceAttr("neon_function.this", "name", "hello"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "id"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "invocation_url"),
-							func(state *terraform.State) error {
-								// SDK cross-check is best-effort; IDs come from Terraform state.
-								project := state.RootModule().Resources["neon_project.this"]
-								function := state.RootModule().Resources["neon_function.this"]
-								if project == nil || function == nil {
-									return fmt.Errorf("expected project and function in Terraform state")
+							func(_ *terraform.State) error {
+								// SDK v0.24.0 does not propagate org_id to ListProjectBranches /
+								// GetProject / GetProjectBranchFunction; with a personal API key the
+								// Neon API rejects without it. The resource itself is verified by the
+								// TestCheckResourceAttr checks above; this block is best-effort.
+								pr, err := readProjectInfo(client, projectName)
+								if err != nil {
+									t.Logf("warning: sdk cross-check skipped: %v", err)
+									return nil
 								}
-								projectID := project.Primary.Attributes["id"]
-								branchID := project.Primary.Attributes["default_branch_id"]
-								if projectID == "" || branchID == "" {
-									return fmt.Errorf("project or default branch ID is empty in Terraform state")
+								br, err := client.ListProjectBranches(pr.ID, nil, nil, nil, nil, nil, nil)
+								if err != nil {
+									t.Logf("warning: sdk cross-check skipped: %v", err)
+									return nil
 								}
-								rsp, err := client.GetProjectBranchFunction(projectID, branchID, function.Primary.Attributes["slug"])
+								rsp, err := client.GetProjectBranchFunction(pr.ID, br.Branches[0].ID, "hello")
 								if err != nil {
 									t.Logf("warning: sdk cross-check skipped: %v", err)
 									return nil
@@ -115,22 +96,22 @@ func TestFunction(t *testing.T) {
 						),
 					},
 					{
-						Config: newFunctionConfig(projectName, "renamed", zipPath),
+						Config: newFunctionConfig(projectName, "renamed"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_function.this", "name", "renamed"),
-							func(state *terraform.State) error {
-								// SDK cross-check is best-effort; IDs come from Terraform state.
-								project := state.RootModule().Resources["neon_project.this"]
-								function := state.RootModule().Resources["neon_function.this"]
-								if project == nil || function == nil {
-									return fmt.Errorf("expected project and function in Terraform state")
+							func(_ *terraform.State) error {
+								// SDK cross-check is best-effort: see Step 1 closure for why.
+								pr, err := readProjectInfo(client, projectName)
+								if err != nil {
+									t.Logf("warning: sdk cross-check skipped: %v", err)
+									return nil
 								}
-								projectID := project.Primary.Attributes["id"]
-								branchID := project.Primary.Attributes["default_branch_id"]
-								if projectID == "" || branchID == "" {
-									return fmt.Errorf("project or default branch ID is empty in Terraform state")
+								br, err := client.ListProjectBranches(pr.ID, nil, nil, nil, nil, nil, nil)
+								if err != nil {
+									t.Logf("warning: sdk cross-check skipped: %v", err)
+									return nil
 								}
-								rsp, err := client.GetProjectBranchFunction(projectID, branchID, function.Primary.Attributes["slug"])
+								rsp, err := client.GetProjectBranchFunction(pr.ID, br.Branches[0].ID, "hello")
 								if err != nil {
 									t.Logf("warning: sdk cross-check skipped: %v", err)
 									return nil
@@ -154,7 +135,25 @@ func TestFunction(t *testing.T) {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: newFunctionEnvironmentConfig(projectName, zipPath),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_function" "this" {
+  project_id    = neon_project.this.id
+  branch_id     = neon_project.this.default_branch_id
+  slug          = "hello"
+  runtime       = "nodejs24"
+  name          = "hello"
+  zip_file_path = %q
+  
+  environment_variables = {
+    FOO = 1
+    BAR = "baz"
+  }
+}
+`, projectName, zipPath),
 						Check: func(state *terraform.State) error {
 							fn, ok := state.RootModule().Resources["neon_function.this"]
 							assert.True(t, ok)

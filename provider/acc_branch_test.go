@@ -14,14 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func branchConfig(projectName, branchName string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" { name = %q }
-resource "neon_branch" "this" {
-	project_id = neon_project.this.id
-	name       = %q
-}`, projectName, branchName)
-}
-
 func TestRecreateBranchIfNotFound(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -76,7 +68,11 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: branchConfig(projectName, "test"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_branch" "this" {
+	project_id = neon_project.this.id 
+	name       = "test"
+}`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_branch.this",
@@ -97,7 +93,11 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 
 	t.Run("shall destroy even if the branch was deleted outside of terraform,", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := branchConfig(projectName, "test")
+		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_branch" "this" {
+	project_id = neon_project.this.id 
+	name       = "test"
+}`, projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -142,7 +142,11 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: branchConfig(projectName, "foo"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_branch" "this" {
+	project_id = neon_project.this.id 
+	name       = "foo"
+}`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_branch.this",
@@ -151,7 +155,11 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 						),
 					},
 					{
-						Config: branchConfig(projectName, "bar"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_branch" "this" {
+	project_id = neon_project.this.id 
+	name       = "bar"
+}`, projectName),
 						PreConfig: func() {
 							preConfig(projectName, "foo")
 						},
@@ -160,13 +168,31 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 								"neon_branch.this",
 								"name", "bar",
 							),
-							func(state *terraform.State) error {
-								branch, ok := state.RootModule().Resources["neon_branch.this"]
-								if !ok {
-									return fmt.Errorf("resource neon_branch.this not found in state")
+							func(_ *terraform.State) error {
+								ref, err := readProjectInfo(client, projectName)
+								if err != nil {
+									return err
 								}
-								assert.Equal(t, "bar", branch.Primary.Attributes["name"])
-								assert.NotEmpty(t, branch.Primary.Attributes["id"])
+
+								resp, err := client.ListProjectBranches(ref.ID,
+									nil, nil, nil, nil, nil, nil)
+								if err != nil {
+									return err
+								}
+								assert.Len(t, resp.Branches, 2,
+									"2 branches are expected after recreation")
+								var found bool
+								var oldFound bool
+								for _, branch := range resp.Branches {
+									if branch.Name == "bar" {
+										found = true
+									}
+									if branch.Name == "foo" {
+										oldFound = true
+									}
+								}
+								assert.Truef(t, found, "branch 'bar' is expected to be found after recreation")
+								assert.Falsef(t, oldFound, "branch 'foo' is not expected to be found")
 								return nil
 							},
 						),
@@ -177,7 +203,11 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 
 	t.Run("shall fail to import branch if it was deleted", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := branchConfig(projectName, "test")
+		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_branch" "this" {
+	project_id = neon_project.this.id 
+	name       = "test"
+}`, projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -194,21 +224,28 @@ func TestRecreateBranchIfNotFound(t *testing.T) {
 						ImportState:  true,
 						ResourceName: "neon_branch.this",
 						ImportStateIdFunc: func(s *terraform.State) (string, error) {
-							branch, ok := s.RootModule().Resources["neon_branch.this"]
-							if !ok {
-								return "", fmt.Errorf("resource neon_branch.this not found in state")
-							}
-							branchID := branch.Primary.Attributes["id"]
-							projectID := branch.Primary.Attributes["project_id"]
-							if branchID == "" || projectID == "" {
-								return "", fmt.Errorf("branch state is missing id or project_id")
-							}
-							op, err := client.DeleteProjectBranch(projectID, branchID)
+							ref, err := readProjectInfo(client, projectName)
 							if err != nil {
 								return "", err
 							}
-							waitUnfinishedOperations(context.TODO(), client, op.OperationsResponse.Operations)
-							return fmt.Sprintf("%s/%s", projectID, branchID), nil
+
+							resp, err := client.ListProjectBranches(ref.ID,
+								nil, nil, nil, nil, nil, nil)
+							if err != nil {
+								return "", err
+							}
+							var branchID string
+							for _, branch := range resp.Branches {
+								if branch.Name == "test" {
+									branchID = branch.ID
+									op, err := client.DeleteProjectBranch(ref.ID, branch.ID)
+									if err != nil {
+										return "", err
+									}
+									waitUnfinishedOperations(context.TODO(), client, op.OperationsResponse.Operations)
+								}
+							}
+							return fmt.Sprintf("%s/%s", ref.ID, branchID), nil
 						},
 						ExpectError: regexp.MustCompile("404"),
 					},

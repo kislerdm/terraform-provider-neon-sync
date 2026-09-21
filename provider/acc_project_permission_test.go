@@ -12,18 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func projectPermissionConfig(projectName, email string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" {
-  name = %q
-}
-
-resource "neon_project_permission" "this" {
-  project_id = neon_project.this.id
-  grantee    = %q
-}
-`, projectName, email)
-}
-
 func TestProjectPermissionFSMIfResourceDeletedOutsideTerraform(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -78,7 +66,11 @@ func TestProjectPermissionFSMIfResourceDeletedOutsideTerraform(t *testing.T) {
 					},
 					Steps: []resource.TestStep{
 						{
-							Config: projectPermissionConfig(projectName, email),
+							Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_project_permission" "this" {
+	project_id = neon_project.this.id 
+	grantee    = "%s"
+}`, projectName, email),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project_permission.this",
@@ -100,7 +92,11 @@ func TestProjectPermissionFSMIfResourceDeletedOutsideTerraform(t *testing.T) {
 	t.Run("shall destroy even if the project permission was deleted outside of terraform,", func(t *testing.T) {
 		email := "foo@bar.baz"
 		projectName := newProjectName(projectNamePrefix)
-		config := projectPermissionConfig(projectName, email)
+		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_project_permission" "this" {
+	project_id = neon_project.this.id 
+	grantee    = "%s"
+}`, projectName, email)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -132,7 +128,7 @@ func TestProjectPermissionFSMIfResourceDeletedOutsideTerraform(t *testing.T) {
 					},
 					// to avoid dangling resources on post-test destroy
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" { name = %q }`, projectName),
+						Config: fmt.Sprintf(`resource "neon_project" "this" { name = "%s" }`, projectName),
 					},
 				},
 			})

@@ -14,19 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newRoleConfig(projectName, roleName string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" {name = %q}
-resource "neon_role" "this" {
-  project_id = neon_project.this.id
-  branch_id  = neon_project.this.default_branch_id
-  name       = %q
-}`, projectName, roleName)
-}
-
-func newRoleProjectConfig(projectName string) string {
-	return fmt.Sprintf(`resource "neon_project" "this" { name = %q }`, projectName)
-}
-
 func TestRecreateRoleIfNotFound(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -85,7 +72,12 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: newRoleConfig(projectName, "test"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_role" "this" {
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+	name       = "test"
+}`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_role.this",
@@ -106,7 +98,12 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 
 	t.Run("shall destroy even if the role was deleted outside of terraform,", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := newRoleConfig(projectName, "test")
+		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_role" "this" {
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+	name       = "test"
+}`, projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -151,7 +148,12 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: newRoleConfig(projectName, "foo"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_role" "this" {
+	project_id = neon_project.this.id 
+	branch_id  = neon_project.this.default_branch_id
+	name       = "foo"
+}`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_role.this",
@@ -160,7 +162,12 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 						),
 					},
 					{
-						Config: newRoleConfig(projectName, "bar"),
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_role" "this" {
+	project_id = neon_project.this.id 
+	branch_id  = neon_project.this.default_branch_id
+	name       = "bar"
+}`, projectName),
 						PreConfig: func() {
 							preConfig(projectName, "foo")
 						},
@@ -169,19 +176,26 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 								"neon_role.this",
 								"name", "bar",
 							),
-							func(state *terraform.State) error {
-								project := state.RootModule().Resources["neon_project.this"]
-								role := state.RootModule().Resources["neon_role.this"]
-								if project == nil || role == nil {
-									return fmt.Errorf("expected project and role resources in state")
-								}
-								projectID := project.Primary.Attributes["id"]
-								branchID := role.Primary.Attributes["branch_id"]
-								if projectID == "" || branchID == "" {
-									return fmt.Errorf("state is missing project or branch ID")
+							func(_ *terraform.State) error {
+								ref, err := readProjectInfo(client, projectName)
+								if err != nil {
+									return err
 								}
 
-								respRoles, err := client.ListProjectBranchRoles(projectID, branchID)
+								resp, err := client.ListProjectBranches(ref.ID,
+									nil, nil, nil, nil, nil, nil)
+								if err != nil {
+									return err
+								}
+
+								var branchID string
+								for _, branch := range resp.Branches {
+									if branch.Default {
+										branchID = branch.ID
+									}
+								}
+
+								respRoles, err := client.ListProjectBranchRoles(ref.ID, branchID)
 								if err != nil {
 									return err
 								}
@@ -208,7 +222,12 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 
 	t.Run("shall fail to import role if it was deleted", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := newRoleConfig(projectName, "test")
+		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
+resource "neon_role" "this" {
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+	name       = "test"
+}`, projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -225,30 +244,36 @@ func TestRecreateRoleIfNotFound(t *testing.T) {
 						ImportState:  true,
 						ResourceName: "neon_role.this",
 						ImportStateIdFunc: func(s *terraform.State) (string, error) {
-							project := s.RootModule().Resources["neon_project.this"]
-							role := s.RootModule().Resources["neon_role.this"]
-							if project == nil || role == nil {
-								return "", fmt.Errorf("expected project and role resources in state")
-							}
-							projectID := project.Primary.Attributes["id"]
-							branchID := role.Primary.Attributes["branch_id"]
-							if projectID == "" || branchID == "" {
-								return "", fmt.Errorf("state is missing project or branch ID")
+							ref, err := readProjectInfo(client, projectName)
+							if err != nil {
+								return "", err
 							}
 
-							op, err := client.DeleteProjectBranchRole(projectID, branchID, "test")
+							resp, err := client.ListProjectBranches(ref.ID,
+								nil, nil, nil, nil, nil, nil)
+							if err != nil {
+								return "", err
+							}
+							var branchID string
+							for _, branch := range resp.Branches {
+								if branch.Default {
+									branchID = branch.ID
+								}
+							}
+
+							op, err := client.DeleteProjectBranchRole(ref.ID, branchID, "test")
 							if err != nil {
 								return "", err
 							}
 							waitUnfinishedOperations(context.TODO(), client, op.OperationsResponse.Operations)
 
-							return fmt.Sprintf("%s/%s/test", projectID, branchID), nil
+							return fmt.Sprintf("%s/%s/test", ref.ID, branchID), nil
 						},
 						ExpectError: regexp.MustCompile("404"),
 					},
 					// to avoid dangling resources on post-test destroy
 					{
-						Config: newRoleProjectConfig(projectName),
+						Config: fmt.Sprintf(`resource "neon_project" "this" { name = "%s" }`, projectName),
 					},
 				},
 			})

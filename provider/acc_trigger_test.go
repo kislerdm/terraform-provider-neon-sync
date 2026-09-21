@@ -45,7 +45,7 @@ func TestAccNeonTrigger(t *testing.T) {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
 						assert.Equal(t, "schedule", rs.Primary.Attributes["type"])
-						assert.Equal(t, "*/5 * * * *", rs.Primary.Attributes["cron"])
+						assert.Equal(t, "*/5 * * * *", rs.Primary.Attributes["schedule.cron"])
 						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
 						assert.NotEmpty(t, rs.Primary.Attributes["id"])
 						return nil
@@ -68,8 +68,8 @@ func TestAccNeonTrigger(t *testing.T) {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
 						assert.Equal(t, "storage_object_created", rs.Primary.Attributes["type"])
-						assert.Equal(t, "mybucket", rs.Primary.Attributes["bucket_name"])
-						assert.Equal(t, "logs/", rs.Primary.Attributes["prefix"])
+						assert.Equal(t, "mybucket", rs.Primary.Attributes["storage_object_created.bucket_name"])
+						assert.Equal(t, "logs/", rs.Primary.Attributes["storage_object_created.prefix"])
 						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
 						return nil
 					},
@@ -94,7 +94,7 @@ func TestAccNeonTrigger(t *testing.T) {
 						if !ok {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
-						assert.Equal(t, "*/10 * * * *", rs.Primary.Attributes["cron"])
+						assert.Equal(t, "*/10 * * * *", rs.Primary.Attributes["schedule.cron"])
 						return nil
 					},
 				},
@@ -104,12 +104,14 @@ func TestAccNeonTrigger(t *testing.T) {
 
 	t.Run("shall reject import with a clear diagnostic", func(t *testing.T) {
 		config := `resource "neon_trigger" "this" {
-  project_id    = "0"
-  branch_id     = "br-1"
-  type          = "schedule"
-  name          = "imp"
-  function_slug = "myfn"
-  cron          = "*/5 * * * *"
+  project_id     = "0"
+  branch_id      = "br-1"
+  type           = "schedule"
+  name           = "imp"
+  function_slug  = "myfn"
+  schedule       = {
+    cron = "*/5 * * * *"
+  }
 }`
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: newProviderFactories(),
@@ -140,7 +142,9 @@ resource "neon_trigger" "this" {
   name           = %q
   type           = "schedule"
   function_slug  = %q
-  cron           = %q
+  schedule = {
+    cron = %q
+  }
 }
 `, projectName, triggerName, fnSlug, cron)
 }
@@ -163,8 +167,10 @@ resource "neon_trigger" "this" {
   name           = %q
   type           = "storage_object_created"
   function_slug  = %q
-  bucket_name    = neon_bucket.this.name
-  prefix         = %q
+  storage_object_created = {
+    bucket_name = neon_bucket.this.name
+    prefix      = %q
+  }
   depends_on = [neon_bucket.this]
 }
 `, projectName, bucket, triggerName, fnSlug, prefix)
