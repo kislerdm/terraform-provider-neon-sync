@@ -25,29 +25,21 @@ type neonTriggerResource struct {
 }
 
 type neonTriggerResourceModel struct {
-	ID                   types.String               `tfsdk:"id"`
-	ProjectID            types.String               `tfsdk:"project_id"`
-	BranchID             types.String               `tfsdk:"branch_id"`
-	Name                 types.String               `tfsdk:"name"`
-	Type                 types.String               `tfsdk:"type"`
-	FunctionSlug         types.String               `tfsdk:"function_slug"`
-	FunctionPath         types.String               `tfsdk:"function_path"`
-	Enabled              types.Bool                 `tfsdk:"enabled"`
-	Schedule             *scheduleModel             `tfsdk:"schedule"`
-	StorageObjectCreated *storageObjectCreatedModel `tfsdk:"storage_object_created"`
-	TriggerID            types.String               `tfsdk:"trigger_id"`
-	Version              types.Int64                `tfsdk:"version"`
-	NextRunAt            types.String               `tfsdk:"next_run_at"`
-	Inherited            types.Bool                 `tfsdk:"inherited"`
-}
-
-type scheduleModel struct {
-	Cron types.String `tfsdk:"cron"`
-}
-
-type storageObjectCreatedModel struct {
-	BucketName types.String `tfsdk:"bucket_name"`
-	Prefix     types.String `tfsdk:"prefix"`
+	ID           types.String `tfsdk:"id"`
+	ProjectID    types.String `tfsdk:"project_id"`
+	BranchID     types.String `tfsdk:"branch_id"`
+	Name         types.String `tfsdk:"name"`
+	Type         types.String `tfsdk:"type"`
+	FunctionSlug types.String `tfsdk:"function_slug"`
+	FunctionPath types.String `tfsdk:"function_path"`
+	Enabled      types.Bool   `tfsdk:"enabled"`
+	Cron         types.String `tfsdk:"cron"`
+	BucketName   types.String `tfsdk:"bucket_name"`
+	Prefix       types.String `tfsdk:"prefix"`
+	TriggerID    types.String `tfsdk:"trigger_id"`
+	Version      types.Int64  `tfsdk:"version"`
+	NextRunAt    types.String `tfsdk:"next_run_at"`
+	Inherited    types.Bool   `tfsdk:"inherited"`
 }
 
 func NewNeonTriggerResource() resource.Resource {
@@ -99,27 +91,17 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Computed:    true,
 				Description: "Whether future occurrences should fire the trigger.",
 			},
-			"schedule": schema.SingleNestedAttribute{
-				Optional: true,
-				Attributes: map[string]schema.Attribute{
-					"cron": schema.StringAttribute{
-						Required:    true,
-						Description: "Numeric five-field cron expression (minute through day-of-week), interpreted in UTC.",
-					},
-				},
+			"cron": schema.StringAttribute{
+				Optional:    true,
+				Description: "Numeric five-field cron expression (minute through day-of-week), interpreted in UTC. Required when `type` is `schedule`.",
 			},
-			"storage_object_created": schema.SingleNestedAttribute{
-				Optional: true,
-				Attributes: map[string]schema.Attribute{
-					"bucket_name": schema.StringAttribute{
-						Required:    true,
-						Description: "The exact object-storage bucket name to watch.",
-					},
-					"prefix": schema.StringAttribute{
-						Optional:    true,
-						Description: "Optional object-key prefix. Max 1024 UTF-8 bytes.",
-					},
-				},
+			"bucket_name": schema.StringAttribute{
+				Optional:    true,
+				Description: "The exact object-storage bucket name to watch. Required when `type` is `storage_object_created`.",
+			},
+			"prefix": schema.StringAttribute{
+				Optional:    true,
+				Description: "Optional object-key prefix matched against uploaded object keys. Max 1024 UTF-8 bytes. Used only when `type` is `storage_object_created`.",
 			},
 			"trigger_id": schema.StringAttribute{
 				Computed:    true,
@@ -153,38 +135,38 @@ func (r *neonTriggerResource) ModifyPlan(ctx context.Context, req resource.Modif
 	}
 
 	typ := planned.Type.ValueString()
-	scheduleSet := planned.Schedule != nil
-	storageSet := planned.StorageObjectCreated != nil
+	scheduleSet := !planned.Cron.IsNull() && !planned.Cron.IsUnknown()
+	storageSet := !planned.BucketName.IsNull() && !planned.BucketName.IsUnknown()
 
 	switch typ {
 	case "schedule":
 		if !scheduleSet {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("schedule"),
-				"Missing required block",
-				"When type is `schedule`, the `schedule` block is required.",
+				path.Root("cron"),
+				"Missing required attribute",
+				"When type is `schedule`, `cron` is required.",
 			)
 		}
 		if storageSet {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("storage_object_created"),
-				"Incompatible block for type",
-				"When type is `schedule`, the `storage_object_created` block must not be set.",
+				path.Root("bucket_name"),
+				"Incompatible attribute for type",
+				"When type is `schedule`, `bucket_name` must not be set.",
 			)
 		}
 	case "storage_object_created":
 		if !storageSet {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("storage_object_created"),
-				"Missing required block",
-				"When type is `storage_object_created`, the `storage_object_created` block is required.",
+				path.Root("bucket_name"),
+				"Missing required attribute",
+				"When type is `storage_object_created`, `bucket_name` is required.",
 			)
 		}
 		if scheduleSet {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("schedule"),
-				"Incompatible block for type",
-				"When type is `storage_object_created`, the `schedule` block must not be set.",
+				path.Root("cron"),
+				"Incompatible attribute for type",
+				"When type is `storage_object_created`, `cron` must not be set.",
 			)
 		}
 	}
@@ -382,10 +364,9 @@ func buildTriggerCreateRequest(plan *neonTriggerResourceModel) neon.TriggerCreat
 			en := plan.Enabled.ValueBool()
 			cfg.ScheduleTriggerCreateRequest.Enabled = &en
 		}
-		if plan.Schedule != nil {
-			cfg.ScheduleTriggerCreateRequest.Schedule = neon.FunctionTriggerSchedule{
-				Cron: plan.Schedule.Cron.ValueString(),
-			}
+		if !plan.Cron.IsNull() && !plan.Cron.IsUnknown() {
+			c := plan.Cron.ValueString()
+			cfg.ScheduleTriggerCreateRequest.Schedule = neon.FunctionTriggerSchedule{Cron: c}
 		}
 	case "storage_object_created":
 		typeVal, _ := neon.NewStorageObjectCreatedTriggerCreateRequestType("storage_object_created")
@@ -400,14 +381,14 @@ func buildTriggerCreateRequest(plan *neonTriggerResourceModel) neon.TriggerCreat
 			en := plan.Enabled.ValueBool()
 			cfg.StorageObjectCreatedTriggerCreateRequest.Enabled = &en
 		}
-		if plan.StorageObjectCreated != nil {
-			cfg.StorageObjectCreatedTriggerCreateRequest.StorageObjectCreated = neon.FunctionTriggerStorageObjectCreated{
-				BucketName: plan.StorageObjectCreated.BucketName.ValueString(),
+		if !plan.BucketName.IsNull() && !plan.BucketName.IsUnknown() {
+			bn := plan.BucketName.ValueString()
+			soc := neon.FunctionTriggerStorageObjectCreated{BucketName: bn}
+			if !plan.Prefix.IsNull() && !plan.Prefix.IsUnknown() {
+				p := plan.Prefix.ValueString()
+				soc.Prefix = &p
 			}
-			if !plan.StorageObjectCreated.Prefix.IsNull() && !plan.StorageObjectCreated.Prefix.IsUnknown() {
-				p := plan.StorageObjectCreated.Prefix.ValueString()
-				cfg.StorageObjectCreatedTriggerCreateRequest.StorageObjectCreated.Prefix = &p
-			}
+			cfg.StorageObjectCreatedTriggerCreateRequest.StorageObjectCreated = soc
 		}
 	}
 	return cfg
@@ -433,9 +414,9 @@ func buildTriggerUpdateRequest(plan *neonTriggerResourceModel) neon.TriggerUpdat
 			en := plan.Enabled.ValueBool()
 			cfg.ScheduleTriggerUpdateRequest.Enabled = &en
 		}
-		if plan.Schedule != nil {
-			cron := plan.Schedule.Cron.ValueString()
-			cfg.ScheduleTriggerUpdateRequest.Schedule = &neon.FunctionTriggerSchedule{Cron: cron}
+		if !plan.Cron.IsNull() && !plan.Cron.IsUnknown() {
+			c := plan.Cron.ValueString()
+			cfg.ScheduleTriggerUpdateRequest.Schedule = &neon.FunctionTriggerSchedule{Cron: c}
 		}
 	case "storage_object_created":
 		typeVal, _ := neon.NewStorageObjectCreatedTriggerUpdateRequestType("storage_object_created")
@@ -452,12 +433,11 @@ func buildTriggerUpdateRequest(plan *neonTriggerResourceModel) neon.TriggerUpdat
 			en := plan.Enabled.ValueBool()
 			cfg.StorageObjectCreatedTriggerUpdateRequest.Enabled = &en
 		}
-		if plan.StorageObjectCreated != nil {
-			soc := neon.FunctionTriggerStorageObjectCreated{
-				BucketName: plan.StorageObjectCreated.BucketName.ValueString(),
-			}
-			if !plan.StorageObjectCreated.Prefix.IsNull() && !plan.StorageObjectCreated.Prefix.IsUnknown() {
-				p := plan.StorageObjectCreated.Prefix.ValueString()
+		if !plan.BucketName.IsNull() && !plan.BucketName.IsUnknown() {
+			bn := plan.BucketName.ValueString()
+			soc := neon.FunctionTriggerStorageObjectCreated{BucketName: bn}
+			if !plan.Prefix.IsNull() && !plan.Prefix.IsUnknown() {
+				p := plan.Prefix.ValueString()
 				soc.Prefix = &p
 			}
 			cfg.StorageObjectCreatedTriggerUpdateRequest.StorageObjectCreated = &soc
@@ -472,22 +452,22 @@ func setNeonTriggerModel(model *neonTriggerResourceModel, t neon.Trigger) {
 		model.ProjectID.ValueString(), model.BranchID.ValueString(), triggerID))
 	model.TriggerID = types.StringValue(triggerID)
 
-	scheduleType := t.ScheduleTrigger.Type.String()
-	storageType := t.StorageObjectCreatedTrigger.Type.String()
-
-	switch {
-	case scheduleType == "schedule":
+	switch t.Type {
+	case "schedule":
 		setNeonTriggerModelFromSchedule(model, t.ScheduleTrigger)
-	case storageType == "storage_object_created":
+	case "storage_object_created":
 		setNeonTriggerModelFromStorage(model, t.StorageObjectCreatedTrigger)
 	}
 }
 
 func triggerIDFromTrigger(t neon.Trigger) string {
-	if t.ScheduleTrigger.Type.String() == "schedule" {
+	switch t.Type {
+	case "schedule":
 		return string(t.ScheduleTrigger.TriggerID)
+	case "storage_object_created":
+		return string(t.StorageObjectCreatedTrigger.TriggerID)
 	}
-	return string(t.StorageObjectCreatedTrigger.TriggerID)
+	return ""
 }
 
 func setNeonTriggerModelFromSchedule(model *neonTriggerResourceModel, st neon.ScheduleTrigger) {
@@ -504,11 +484,12 @@ func setNeonTriggerModelFromSchedule(model *neonTriggerResourceModel, st neon.Sc
 		model.NextRunAt = types.StringNull()
 	}
 	if st.Schedule.Cron != "" {
-		model.Schedule = &scheduleModel{Cron: types.StringValue(st.Schedule.Cron)}
+		model.Cron = types.StringValue(st.Schedule.Cron)
 	} else {
-		model.Schedule = nil
+		model.Cron = types.StringNull()
 	}
-	model.StorageObjectCreated = nil
+	model.BucketName = types.StringNull()
+	model.Prefix = types.StringNull()
 }
 
 func setNeonTriggerModelFromStorage(model *neonTriggerResourceModel, st neon.StorageObjectCreatedTrigger) {
@@ -520,16 +501,17 @@ func setNeonTriggerModelFromStorage(model *neonTriggerResourceModel, st neon.Sto
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
 	model.NextRunAt = types.StringNull()
-	soc := &storageObjectCreatedModel{
-		BucketName: types.StringValue(st.StorageObjectCreated.BucketName),
+	if st.StorageObjectCreated.BucketName != "" {
+		model.BucketName = types.StringValue(st.StorageObjectCreated.BucketName)
+	} else {
+		model.BucketName = types.StringNull()
 	}
 	if st.StorageObjectCreated.Prefix != nil {
-		soc.Prefix = types.StringValue(*st.StorageObjectCreated.Prefix)
+		model.Prefix = types.StringValue(*st.StorageObjectCreated.Prefix)
 	} else {
-		soc.Prefix = types.StringNull()
+		model.Prefix = types.StringNull()
 	}
-	model.StorageObjectCreated = soc
-	model.Schedule = nil
+	model.Cron = types.StringNull()
 }
 
 type triggerTypeValidator struct{}
