@@ -13,6 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func apiKeyConfig(name string) string {
+	return fmt.Sprintf(`resource "neon_api_key" "this" {
+  name = %q
+}
+`, name)
+}
+
 func TestRecreateAPIKeyIfNotFound(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -65,7 +72,7 @@ func TestRecreateAPIKeyIfNotFound(t *testing.T) {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_api_key" "this" {name = "%s"}`, keyName),
+						Config: apiKeyConfig(keyName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_api_key.this",
@@ -86,7 +93,7 @@ func TestRecreateAPIKeyIfNotFound(t *testing.T) {
 
 	t.Run("shall destroy even if the API key was deleted outside of terraform,", func(t *testing.T) {
 		keyName := "test" + uuid.NewString()
-		config := fmt.Sprintf(`resource "neon_api_key" "this" {name = "%s"}`, keyName)
+		config := apiKeyConfig(keyName)
 		resource.Test(
 			t, resource.TestCase{
 				ProtoV6ProviderFactories: newProviderFactories(),

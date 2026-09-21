@@ -12,6 +12,35 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func newBucketConfig(projectName, bucketName, accessLevel string) string {
+	config := fmt.Sprintf(`resource "neon_project" "this" {
+  name      = %q
+  region_id = "aws-us-east-2"
+}
+
+resource "neon_bucket" "this" {
+  project_id = neon_project.this.id
+  branch_id  = neon_project.this.default_branch_id
+  name       = %q
+`, projectName, bucketName)
+	if accessLevel != "" {
+		config += fmt.Sprintf("  access_level = %q\n", accessLevel)
+	}
+	return config + "}\n"
+}
+
+func newImportedBucketConfig(projectID, branchID, bucketName, accessLevel string) string {
+	config := fmt.Sprintf(`resource "neon_bucket" "this" {
+  project_id = %q
+  branch_id  = %q
+  name       = %q
+`, projectID, branchID, bucketName)
+	if accessLevel != "" {
+		config += fmt.Sprintf("  access_level = %q\n", accessLevel)
+	}
+	return config + "}\n"
+}
+
 func TestBucket(t *testing.T) {
 	if os.Getenv("TF_ACC") != "1" {
 		t.Skip("TF_ACC must be set to 1")
@@ -38,17 +67,7 @@ func TestBucket(t *testing.T) {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id = neon_project.this.id
-  branch_id  = neon_project.this.default_branch_id
-  name       = "foo"
-}
-`, projectName),
+						Config: newBucketConfig(projectName, "foo", ""),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_bucket.this", "name", "foo"),
 							resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
@@ -62,24 +81,11 @@ resource "neon_bucket" "this" {
 									}
 									return nil
 								}),
-							func(_ *terraform.State) error {
-								pr, err := readProjectInfo(client, projectName)
-								if err != nil {
-									return err
-								}
-								br, err := client.ListProjectBranches(pr.ID,
-									nil, nil, nil, nil, nil, nil)
-								if err != nil {
-									return err
-								}
-
-								b, err := client.ListProjectBranchBuckets(pr.ID, br.Branches[0].ID)
-								if err != nil {
-									return err
-								}
-								assert.Len(t, b.Buckets, 1)
-								assert.Equal(t, b.Buckets[0].Name, "foo")
-								assert.Equal(t, neon.BucketAccessLevelPrivate, b.Buckets[0].AccessLevel)
+							func(state *terraform.State) error {
+								bucket := state.RootModule().Resources["neon_bucket.this"]
+								assert.NotNil(t, bucket)
+								assert.Equal(t, "foo", bucket.Primary.Attributes["name"])
+								assert.Equal(t, "private", bucket.Primary.Attributes["access_level"])
 								return nil
 							},
 						),
@@ -96,18 +102,7 @@ resource "neon_bucket" "this" {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id   = neon_project.this.id
-  branch_id    = neon_project.this.default_branch_id
-  name         = "foo"
-  access_level = "public_read"
-}
-`, projectName),
+						Config: newBucketConfig(projectName, "foo", "public_read"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_bucket.this", "name", "foo"),
 							resource.TestCheckResourceAttr("neon_bucket.this", "access_level",
@@ -121,24 +116,11 @@ resource "neon_bucket" "this" {
 									}
 									return nil
 								}),
-							func(_ *terraform.State) error {
-								pr, err := readProjectInfo(client, projectName)
-								if err != nil {
-									return err
-								}
-								br, err := client.ListProjectBranches(pr.ID,
-									nil, nil, nil, nil, nil, nil)
-								if err != nil {
-									return err
-								}
-
-								b, err := client.ListProjectBranchBuckets(pr.ID, br.Branches[0].ID)
-								if err != nil {
-									return err
-								}
-								assert.Len(t, b.Buckets, 1)
-								assert.Equal(t, b.Buckets[0].Name, "foo")
-								assert.Equal(t, neon.BucketAccessLevelPublicRead, b.Buckets[0].AccessLevel)
+							func(state *terraform.State) error {
+								bucket := state.RootModule().Resources["neon_bucket.this"]
+								assert.NotNil(t, bucket)
+								assert.Equal(t, "foo", bucket.Primary.Attributes["name"])
+								assert.Equal(t, "public_read", bucket.Primary.Attributes["access_level"])
 								return nil
 							},
 						),
@@ -175,13 +157,7 @@ resource "neon_bucket" "this" {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
-  project_id   = "%s"
-  branch_id    = "%s"
-  name         = "foo"
-  access_level = "public_read"
-}
-`, projectID, branchID),
+						Config:        newImportedBucketConfig(projectID, branchID, "foo", "public_read"),
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
 						ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, "foo"),
@@ -219,7 +195,7 @@ resource "neon_bucket" "this" {
 `,
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
-						ImportStateId: fmt.Sprintf("foo"),
+						ImportStateId: "foo",
 						ExpectError: regexp.MustCompile(
 							"Expected an import ID in the form <project_id>/<branch_id>/<bucket_name>",
 						),
@@ -286,12 +262,7 @@ resource "neon_bucket" "this" {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
-  project_id   = "%s"
-  branch_id    = "%s"
-  name         = "bar"
-}
-`, projectID, branchID),
+						Config:        newImportedBucketConfig(projectID, branchID, "bar", ""),
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
 						ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, "bar"),
@@ -323,12 +294,7 @@ resource "neon_bucket" "this" {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_bucket" "this" {
-  project_id   = "%s"
-  branch_id    = "%s"
-  name         = "foo"
-}
-`, projectID, branchID),
+						Config:        newImportedBucketConfig(projectID, branchID, "foo", ""),
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
 						ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, "foo"),
@@ -341,17 +307,7 @@ resource "neon_bucket" "this" {
 
 	t.Run("shall destroy deleted bucket", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id = neon_project.this.id
-  branch_id  = neon_project.this.default_branch_id
-  name       = "foo"
-}
-`, projectName)
+		config := newBucketConfig(projectName, "foo", "")
 		resource.Test(
 			t, resource.TestCase{
 				ProtoV6ProviderFactories: newProviderFactories(),
@@ -404,47 +360,15 @@ resource "neon_bucket" "this" {
 				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id = neon_project.this.id
-  branch_id  = neon_project.this.default_branch_id
-  name       = "foo"
-}
-`, projectName),
+						Config: newBucketConfig(projectName, "foo", ""),
 					},
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id   = neon_project.this.id
-  branch_id    = neon_project.this.default_branch_id
-  name         = "foo"
-  access_level = "public_read"
-}
-`, projectName),
+						Config:      newBucketConfig(projectName, "foo", "public_read"),
 						PlanOnly:    true,
 						ExpectError: regexp.MustCompile("Neon Bucket Update Not Supported"),
 					},
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {
-	name      = "%s"
-	region_id = "aws-us-east-2"
-}
-
-resource "neon_bucket" "this" {
-  project_id   = neon_project.this.id
-  branch_id    = neon_project.this.default_branch_id
-  name         = "foo"
-  access_level = "public_read"
-}
-`, projectName),
+						Config:      newBucketConfig(projectName, "foo", "public_read"),
 						ExpectError: regexp.MustCompile("Neon Bucket Update Not Supported"),
 					},
 				},

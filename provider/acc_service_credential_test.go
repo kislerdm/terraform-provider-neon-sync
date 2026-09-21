@@ -85,13 +85,7 @@ func TestServiceCredential(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: fmt.Sprintf(`resource "neon_service_credential" "this" {
-  project_id = %q
-  branch_id  = %q
-  name       = "imported"
-  scopes     = ["functions:invoke"]
-}
-`, projectID, branchID),
+					Config:        serviceCredentialImportConfig(projectID, branchID, name),
 					ImportState:   true,
 					ResourceName:  "neon_service_credential.this",
 					ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, created.TokenID),
@@ -152,12 +146,7 @@ func TestServiceCredential(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: fmt.Sprintf(`resource "neon_service_credential" "this" {
-  project_id = %q
-  branch_id  = %q
-  scopes     = ["functions:invoke"]
-}
-`, projectID, branchID),
+					Config:        serviceCredentialImportConfig(projectID, branchID, ""),
 					ImportState:   true,
 					ResourceName:  "neon_service_credential.this",
 					ImportStateId: fmt.Sprintf("%s/%s/nak_live_nonexistent", projectID, branchID),
@@ -187,8 +176,7 @@ func TestServiceCredential(t *testing.T) {
 						if err != nil {
 							panic(err)
 						}
-						br, err := client.ListProjectBranches(pr.ID,
-							nil, nil, nil, nil, nil, nil)
+						br, err := client.ListProjectBranches(pr.ID, nil, nil, nil, nil, nil, nil)
 						if err != nil {
 							panic(err)
 						}
@@ -254,6 +242,16 @@ resource "neon_service_credential" "this" {
   scopes     = ["functions:invoke"]
 }
 `, projectName, credentialName)
+}
+
+func serviceCredentialImportConfig(projectID, branchID, credentialName string) string {
+	return fmt.Sprintf(`resource "neon_service_credential" "this" {
+  project_id = %q
+  branch_id  = %q
+  name       = %q
+  scopes     = ["functions:invoke"]
+}
+`, projectID, branchID, credentialName)
 }
 
 func createServiceCredentialProject(t *testing.T, client *neon.Client, projectName string) (string, string) {

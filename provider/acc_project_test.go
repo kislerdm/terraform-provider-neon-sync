@@ -13,6 +13,33 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func newProjectConfig(projectName string) string {
+	return fmt.Sprintf(`resource "neon_project" "this" {
+  name = %q
+}
+`, projectName)
+}
+
+func newProjectComputeConfig(projectName string, minCU, maxCU float64, suspendTimeout int, primaryMinCU, primaryMaxCU float64, primarySuspendTimeout int) string {
+	return fmt.Sprintf(`resource "neon_project" "this" {
+  name                     = %q
+  autoscaling_limit_min_cu = %v
+  autoscaling_limit_max_cu = %v
+  suspend_timeout_seconds  = %d
+
+  primary_compute {
+    autoscaling_limit_min_cu = %v
+    autoscaling_limit_max_cu = %v
+    suspend_timeout_seconds  = %d
+  }
+}
+`, projectName, minCU, maxCU, suspendTimeout, primaryMinCU, primaryMaxCU, primarySuspendTimeout)
+}
+
+func projectIDFromState(state *terraform.State) string {
+	return state.RootModule().Resources["neon_project.this"].Primary.ID
+}
+
 func TestRecreateProjectIfNotFound(t *testing.T) {
 	// see: https://github.com/kislerdm/terraform-provider-neon/issues/209
 
@@ -48,7 +75,7 @@ func TestRecreateProjectIfNotFound(t *testing.T) {
 
 	t.Run("shall indicate non empty plan if the project was deleted outside of terraform", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}`, projectName)
+		config := newProjectConfig(projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -79,7 +106,7 @@ func TestRecreateProjectIfNotFound(t *testing.T) {
 
 	t.Run("shall destroy even if the project was deleted outside of terraform,", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}`, projectName)
+		config := newProjectConfig(projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -125,26 +152,28 @@ func TestRecreateProjectIfNotFound(t *testing.T) {
 				},
 				Steps: []resource.TestStep{
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s-foo"}`, projectName),
+						Config: newProjectConfig(projectName + "-foo"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_project.this",
-								"name", fmt.Sprintf("%s-foo", projectName),
+								"name", projectName+"-foo",
 							),
 						),
 					},
 					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s-bar"}`, projectName),
+						Config: newProjectConfig(projectName + "-bar"),
 						PreConfig: func() {
-							refProjectID = preConfig(fmt.Sprintf("%s-foo", projectName))
+							refProjectID = preConfig(projectName + "-foo")
 						},
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr(
 								"neon_project.this",
-								"name", fmt.Sprintf("%s-bar", projectName),
+								"name", projectName+"-bar",
 							),
-							func(_ *terraform.State) error {
-								got, err := readProjectInfo(client, fmt.Sprintf("%s-bar", projectName))
+							func(state *terraform.State) error {
+								projectID := projectIDFromState(state)
+								gotResponse, err := client.GetProject(projectID)
+								got := gotResponse.Project
 								if err != nil {
 									return err
 								}
@@ -160,7 +189,7 @@ func TestRecreateProjectIfNotFound(t *testing.T) {
 
 	t.Run("shall fail to import project if it was deleted", func(t *testing.T) {
 		projectName := newProjectName(projectNamePrefix)
-		config := fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}`, projectName)
+		config := newProjectConfig(projectName)
 		resource.Test(
 			t, resource.TestCase{
 				ProviderFactories: map[string]func() (*schema.Provider, error){
@@ -217,19 +246,7 @@ func TestPrimaryCompute(t *testing.T) {
 					},
 					Steps: []resource.TestStep{
 						{
-							Config: fmt.Sprintf(`resource "neon_project" "this" {
-		name = "%s"
-		autoscaling_limit_min_cu = 0.25
-		autoscaling_limit_max_cu = 1
-		suspend_timeout_seconds  = 300
-		
-		primary_compute {
-			autoscaling_limit_min_cu = 0.5
-			autoscaling_limit_max_cu = 2
-			suspend_timeout_seconds  = -1
-		}
-}
-`, projectName),
+							Config: newProjectComputeConfig(projectName, 0.25, 1, 300, 0.5, 2, -1),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project.this",
@@ -259,8 +276,10 @@ func TestPrimaryCompute(t *testing.T) {
 									"neon_project.this",
 									"primary_compute.0.suspend_timeout_seconds", "-1",
 								),
-								func(_ *terraform.State) error {
-									got, err := readProjectInfo(client, projectName)
+								func(state *terraform.State) error {
+									projectID := projectIDFromState(state)
+									gotResponse, err := client.GetProject(projectID)
+									got := gotResponse.Project
 									if err != nil {
 										return err
 									}
@@ -309,19 +328,7 @@ func TestPrimaryCompute(t *testing.T) {
 					},
 					Steps: []resource.TestStep{
 						{
-							Config: fmt.Sprintf(`resource "neon_project" "this" {
-		name = "%s"
-		autoscaling_limit_min_cu = 0.25
-		autoscaling_limit_max_cu = 1
-		suspend_timeout_seconds  = 300
-		
-		primary_compute {
-			autoscaling_limit_min_cu = 0.5
-			autoscaling_limit_max_cu = 2
-			suspend_timeout_seconds  = -1
-		}
-}
-`, projectName),
+							Config: newProjectComputeConfig(projectName, 0.25, 1, 300, 0.5, 2, -1),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project.this",
@@ -354,19 +361,7 @@ func TestPrimaryCompute(t *testing.T) {
 							),
 						},
 						{
-							Config: fmt.Sprintf(`resource "neon_project" "this" {
-		name = "%s"
-		autoscaling_limit_min_cu = 0.25
-		autoscaling_limit_max_cu = 1
-		suspend_timeout_seconds  = 300
-		
-		primary_compute {
-			autoscaling_limit_min_cu = 1
-			autoscaling_limit_max_cu = 4
-			suspend_timeout_seconds  = 1200
-		}
-}
-`, projectName),
+							Config: newProjectComputeConfig(projectName, 0.25, 1, 300, 1, 4, 1200),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project.this",
@@ -396,8 +391,10 @@ func TestPrimaryCompute(t *testing.T) {
 									"neon_project.this",
 									"primary_compute.0.suspend_timeout_seconds", "1200",
 								),
-								func(_ *terraform.State) error {
-									got, err := readProjectInfo(client, projectName)
+								func(state *terraform.State) error {
+									projectID := projectIDFromState(state)
+									gotResponse, err := client.GetProject(projectID)
+									got := gotResponse.Project
 									if err != nil {
 										return err
 									}
@@ -446,19 +443,7 @@ func TestPrimaryCompute(t *testing.T) {
 					},
 					Steps: []resource.TestStep{
 						{
-							Config: fmt.Sprintf(`resource "neon_project" "this" {
-		name = "%s"
-		autoscaling_limit_min_cu = 0.25
-		autoscaling_limit_max_cu = 1
-		suspend_timeout_seconds  = 300
-		
-		primary_compute {
-			autoscaling_limit_min_cu = 0.5
-			autoscaling_limit_max_cu = 2
-			suspend_timeout_seconds  = -1
-		}
-}
-`, projectName),
+							Config: newProjectComputeConfig(projectName, 0.25, 1, 300, 0.5, 2, -1),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project.this",
@@ -491,19 +476,7 @@ func TestPrimaryCompute(t *testing.T) {
 							),
 						},
 						{
-							Config: fmt.Sprintf(`resource "neon_project" "this" {
-		name = "%s"
-		autoscaling_limit_min_cu = 0.5
-		autoscaling_limit_max_cu = 2
-		suspend_timeout_seconds  = 600
-		
-		primary_compute {
-			autoscaling_limit_min_cu = 0.5
-			autoscaling_limit_max_cu = 2
-			suspend_timeout_seconds  = -1
-		}
-}
-`, projectName),
+							Config: newProjectComputeConfig(projectName, 0.5, 2, 600, 0.5, 2, -1),
 							Check: resource.ComposeTestCheckFunc(
 								resource.TestCheckResourceAttr(
 									"neon_project.this",
@@ -533,8 +506,10 @@ func TestPrimaryCompute(t *testing.T) {
 									"neon_project.this",
 									"primary_compute.0.suspend_timeout_seconds", "-1",
 								),
-								func(_ *terraform.State) error {
-									got, err := readProjectInfo(client, projectName)
+								func(state *terraform.State) error {
+									projectID := projectIDFromState(state)
+									gotResponse, err := client.GetProject(projectID)
+									got := gotResponse.Project
 									if err != nil {
 										return err
 									}
