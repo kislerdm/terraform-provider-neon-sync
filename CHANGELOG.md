@@ -7,13 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Updated dependencies:
-  - Neon Go SDK: [v0.27.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.27.0)
-
 ### Added
 
+- Added the `neon_snapshot` resource for managing Neon snapshots with create, read, update, delete, and import lifecycle. The new resource compares Terraform state against independently observed Neon API state in its acceptance tests.
 - Added the following resources: 
   - `neon_function`;
   - `neon_trigger`;
@@ -21,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_bucket_object`;
   - `neon_branch`;
   - `neon_service_credential`.
+
+### Changed
+
+- Updated dependencies:
+  - Neon Go SDK: [v0.27.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.27.0)
 
 ## [v0.18.0] - 2026-09-12
 
