@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added the following resources:
-<<<<<<< HEAD
   - `neon_snapshot`;
   - `neon_function`;
   - `neon_trigger`;
