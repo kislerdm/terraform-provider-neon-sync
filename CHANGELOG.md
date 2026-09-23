@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added the `neon_snapshot` resource for managing Neon snapshots with create, read, update, delete, and import lifecycle. The new resource compares Terraform state against independently observed Neon API state in its acceptance tests.
 - Added the following resources: 
+  - `neon_snapshot`;
   - `neon_function`;
   - `neon_trigger`;
   - `neon_bucket`;
