@@ -200,13 +200,12 @@ func (r *neonProjectMemberRoleResource) setRole(ctx context.Context, plan tfsdk.
 
 	var selfDemotion = true
 	diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		re, err := r.client.SetProjectMemberRole(
+		_, err := r.client.SetProjectMemberRole(
 			model.ProjectID.ValueString(),
 			model.MemberID.ValueString(),
 			&selfDemotion,
 			neon.SetProjectMemberRoleRequest{Role: role},
 		)
-		_ = re
 		return err
 	}, ctx)...)
 	if diagnostics.HasError() {
