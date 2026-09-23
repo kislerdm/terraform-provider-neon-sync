@@ -166,6 +166,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonServiceCredentialResource,
 		NewNeonBucketObjectResource,
 		NewNeonFunctionResource,
+		NewNeonProjectMemberRoleResource,
 		NewNeonTriggerResource,
 		NewSnapshotResource,
 	}
