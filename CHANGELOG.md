@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added the following resources: 
+- Added the following resources:
+<<<<<<< HEAD
   - `neon_snapshot`;
   - `neon_function`;
   - `neon_trigger`;
@@ -25,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.18.0] - 2026-09-12
 
-### Fixed 
+### Fixed
 
 - Fixed the update logic for the `autoscaling_limit_min_cu` attribute of the `neon_project` resource so that it now reaches the API. The min-CU update was gated on a change to `autoscaling_limit_max_cu`.
 - Fixed the deletion logic of the `neon_branch_backup_schedule` resource.
@@ -54,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **[BREAKING]** Removed the attr. block `default_endpoint_settings` from the resource `neon_project`. 
+- **[BREAKING]** Removed the attr. block `default_endpoint_settings` from the resource `neon_project`.
 Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscaling_limit_max_cu`, `suspend_timeout_seconds` to configure defaults for the project's compute resources.
 - **[BREAKING]** Removed the attribute `pooler_mode` from the resource `neon_endpoint` because it's no longer supported by the Neon API.
 - **[BREAKING]** Removed the attribute `pooler_enabled` from the resource `neon_endpoint` because the pooling is [always activated](https://neon.com/docs/connect/connection-pooling#enable-disable-and-find-the-pooled-connection-string-in-the-console:~:text=The%20pooled%20endpoint%20is%20always%20available).
@@ -64,7 +65,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 - Updated dependencies:
   - Neon Go SDK: [v0.20.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.16.0...v0.20.0)
 
-## [v0.15.0] - 2026-08-02                                                                                                     
+## [v0.15.0] - 2026-08-02
 
 ### Fixed
 
@@ -79,7 +80,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 ### Added
 
 - [[203](https://github.com/kislerdm/terraform-provider-neon/issues/203)] Added the attribute `hipaa` to the resource `neon_project` to configure the project's HIPAA compliance.
-- [[221](https://github.com/kislerdm/terraform-provider-neon/issues/221)] Added the attribute `default_branch_protected` to the resource `neon_project` to configure protection of the default branch. 
+- [[221](https://github.com/kislerdm/terraform-provider-neon/issues/221)] Added the attribute `default_branch_protected` to the resource `neon_project` to configure protection of the default branch.
 
 ### Fixed
 
@@ -91,23 +92,23 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 
 ### Added
 
-- Added the following attributes to the resource `neon_project`: 
+- Added the following attributes to the resource `neon_project`:
   - `block_public_connections`;
   - `block_vpc_connections`.
 
 ### Fixed
 
-- [[191](https://github.com/kislerdm/terraform-provider-neon/issues/191)] Fixed the import logic for the resource 
+- [[191](https://github.com/kislerdm/terraform-provider-neon/issues/191)] Fixed the import logic for the resource
   `neon_vpc_endpoint_assignment`.
 - Fixed documentation for the resource `neon_project_permission`.
 - [[193](https://github.com/kislerdm/terraform-provider-neon/issues/193)] Fixed the import logic for the resource
   `neon_endpoint`.
 - [[198](https://github.com/kislerdm/terraform-provider-neon/issues/198)] Fixed the import logic for the resource
-  `neon_branch`. 
+  `neon_branch`.
 
 ### Changed
 
-- **[BREAKING]** Changed the `id` attribute of the `neon_project_permission`. It's identical to the identifier assigned 
+- **[BREAKING]** Changed the `id` attribute of the `neon_project_permission`. It's identical to the identifier assigned
   by Neon now.
 
 ## [v0.12.0] - 2025-11-04
@@ -137,7 +138,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 
 ### Fixed
 
-- [[#154](https://github.com/kislerdm/terraform-provider-neon/issues/154)], [[#156](https://github.com/kislerdm/terraform-provider-neon/issues/156)] Fixed projects listing when importing resources.   
+- [[#154](https://github.com/kislerdm/terraform-provider-neon/issues/154)], [[#156](https://github.com/kislerdm/terraform-provider-neon/issues/156)] Fixed projects listing when importing resources.
 - [[#166](https://github.com/kislerdm/terraform-provider-neon/issues/166)] Fixed the `neon_project` resource validation to configure the default endpoint to never suspend.
 - [[#179](https://github.com/kislerdm/terraform-provider-neon/issues/179)] Fixed the `neon_project` resource diff management when the `org_id` is attribute is not set in the terraform module.
 
@@ -151,7 +152,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 
 ### Added
 
-- [[#144](https://github.com/kislerdm/terraform-provider-neon/issues/144)] Added the resource `neon_jwks_url` 
+- [[#144](https://github.com/kislerdm/terraform-provider-neon/issues/144)] Added the resource `neon_jwks_url`
   to manage the JWKs URL provided by the 3rd-party IdP required to establish [Neon RLS authorization](https://neon.tech/docs/guides/neon-rls-authorize).
 
 ### Changed
@@ -176,14 +177,14 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 - Added the "User-Agent" header injected to every request to the Neon API for tracking purposes as agreed with
   James Broadhead from Neon.
 - Added the resource `neon_api_key` to manage Neon API keys.
-- Added the output attributes `connection_uri_pooler` and `database_host_pooler` to the resource `neon_project` to connect to the default database in the pooler mode. 
+- Added the output attributes `connection_uri_pooler` and `database_host_pooler` to the resource `neon_project` to connect to the default database in the pooler mode.
 
 ### Fixed
 
 - [[#119](https://github.com/kislerdm/terraform-provider-neon/issues/119)] Fixed the output attribute `host` of the
   resource `neon_endpoint`: it will yield the correct URI for the endpoints with the
   [pooled mode](https://neon.tech/docs/connect/connection-pooling#how-to-use-connection-pooling) activated.
-- [[#137](https://github.com/kislerdm/terraform-provider-neon/issues/137)] Fixed operations execution management 
+- [[#137](https://github.com/kislerdm/terraform-provider-neon/issues/137)] Fixed operations execution management
   by introducing await mechanism to wait until the running operations finish.
 - [[#133](https://github.com/kislerdm/terraform-provider-neon/issues/133)] Fixed state management when configuring network security.
 - Documentation improvements:
@@ -228,7 +229,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 
 ### Added
 
-- Added support of Postgres 17. See the Neon [announcement](https://neon.tech/blog/postgres-17) and the Postgres 
+- Added support of Postgres 17. See the Neon [announcement](https://neon.tech/blog/postgres-17) and the Postgres
   [announcement](https://www.postgresql.org/about/news/postgresql-17-released-2936/).
 
 ### Fixed
@@ -244,8 +245,8 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
 
 ### Fixed
 
-- **[BREAKING]** [[#96](https://github.com/kislerdm/terraform-provider-neon/issues/96)] The boolean attributes of the 
-  resource `neon_project` will be treated as strings to work around the 
+- **[BREAKING]** [[#96](https://github.com/kislerdm/terraform-provider-neon/issues/96)] The boolean attributes of the
+  resource `neon_project` will be treated as strings to work around the
   [issue](https://github.com/hashicorp/terraform-plugin-sdk/issues/817) with state management when the attribute gets
   removed from the manifest.
 
@@ -255,17 +256,17 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
   ```terraform
    resource "neon_project" "this" {
       name = "myproject"
-      
+
       allowed_ips = ["1.2.3.4/24"]
 
       allowed_ips_primary_branch_only = "yes"
    }
-  ``` 
+  ```
 - Set allowed_ips to be applicable to all branches, explicitly:
   ```terraform
    resource "neon_project" "this" {
       name = "myproject"
-      
+
       allowed_ips = ["1.2.3.4/24"]
 
       allowed_ips_primary_branch_only = "no"
@@ -275,7 +276,7 @@ Instead, use the `neon_project` attributes `autoscaling_limit_min_cu`, `autoscal
   ```terraform
    resource "neon_project" "this" {
       name = "myproject"
-      
+
       allowed_ips = ["1.2.3.4/24"]
    }
   ```
