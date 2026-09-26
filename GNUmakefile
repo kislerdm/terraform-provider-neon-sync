@@ -29,7 +29,7 @@ testacc: ## Runs acceptance tests.
 	@ TF_ACC=1 go test -tags=acceptance -v -timeout 120m ./...
 
 docu: ## Generates docu.
-	@ go generate
+	@ go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-name terraform-provider-neon
 
 lint: ## Runs the linter.
 	@ golangci-lint run -c .golangci.yml --timeout 10m || echo 'install golangci-lint'

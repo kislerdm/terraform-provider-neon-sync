@@ -65,38 +65,18 @@ resource "neon_trigger" "storage" {
 
 ### Optional
 
+- `bucket_name` (String) The exact object-storage bucket name to watch. Required when `type` is `storage_object_created`.
+- `cron` (String) Numeric five-field cron expression (minute through day-of-week), interpreted in UTC. Required when `type` is `schedule`.
 - `enabled` (Boolean) Whether future occurrences should fire the trigger.
 - `function_path` (String) Path passed to the target Function. Defaults to `/`.
-- `schedule` (Attributes) (see [below for nested schema](#nestedatt--schedule))
-- `storage_object_created` (Attributes) (see [below for nested schema](#nestedatt--storage_object_created))
+- `prefix` (String) Optional object-key prefix matched against uploaded object keys. Max 1024 UTF-8 bytes. Used only when `type` is `storage_object_created`.
 
 ### Read-Only
 
 - `id` (String) Composite ID of the form <project_id>/<branch_id>/<trigger_id>.
 - `inherited` (Boolean) True when the effective configuration was authored on an ancestor branch.
-- `next_run_at` (String) Next scheduled occurrence as an RFC 3339 UTC timestamp. Null while disabled or inherited and not explicitly enabled on this branch.
 - `trigger_id` (String) Opaque, server-minted trigger ID.
 - `version` (Number) Monotonic configuration version.
-
-<a id="nestedatt--schedule"></a>
-### Nested Schema for `schedule`
-
-Required:
-
-- `cron` (String) Numeric five-field cron expression (minute through day-of-week), interpreted in UTC.
-
-
-<a id="nestedatt--storage_object_created"></a>
-### Nested Schema for `storage_object_created`
-
-Required:
-
-- `bucket_name` (String) The exact object-storage bucket name to watch.
-
-Optional:
-
-- `prefix` (String) Optional object-key prefix. Max 1024 UTF-8 bytes.
-
 
 
 

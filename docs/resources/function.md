@@ -61,7 +61,6 @@ resource "neon_function" "example" {
 
 - `created_at` (String) RFC3339 timestamp at which the function was created.
 - `current_deployment_id` (Number) Monotonic deployment version number of the most recent deployment, regardless of build status.
-- `current_deployment_status` (String) Build status of the most recent deployment: pending, building, completed, or failed.
 - `environment_variable_names` (List of String) Names of the function's environment variables. Values are never returned by the API.
 - `id` (String) Composite ID of the form <project_id>/<branch_id>/<slug>.
 - `invocation_url` (String) URL at which the function is invoked.
