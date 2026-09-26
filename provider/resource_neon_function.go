@@ -43,7 +43,6 @@ type neonFunctionResourceModel struct {
 	CreatedAt                types.String      `tfsdk:"created_at"`
 	InvocationURL            types.String      `tfsdk:"invocation_url"`
 	CurrentDeploymentID      types.Int64       `tfsdk:"current_deployment_id"`
-	CurrentDeploymentStatus  types.String      `tfsdk:"current_deployment_status"`
 	EnvironmentVariableNames types.List        `tfsdk:"environment_variable_names"`
 }
 
@@ -118,10 +117,6 @@ func (r *neonFunctionResource) Schema(_ context.Context, _ resource.SchemaReques
 			"current_deployment_id": schema.Int64Attribute{
 				Computed:    true,
 				Description: "Monotonic deployment version number of the most recent deployment, regardless of build status.",
-			},
-			"current_deployment_status": schema.StringAttribute{
-				Computed:    true,
-				Description: "Build status of the most recent deployment: pending, building, completed, or failed.",
 			},
 			"environment_variable_names": schema.ListAttribute{
 				ElementType:   types.StringType,
@@ -454,7 +449,6 @@ func setNeonFunctionModel(model *neonFunctionResourceModel, fn neon.NeonFunction
 
 	if fn.CurrentDeployment != nil {
 		model.CurrentDeploymentID = types.Int64Value(int64(fn.CurrentDeployment.ID))
-		model.CurrentDeploymentStatus = types.StringValue(fn.CurrentDeployment.Status.String())
 		if len(fn.CurrentDeployment.Environment) == 0 {
 			model.EnvironmentVariableNames = types.ListNull(types.StringType)
 		} else {
@@ -466,7 +460,6 @@ func setNeonFunctionModel(model *neonFunctionResourceModel, fn neon.NeonFunction
 		}
 	} else {
 		model.CurrentDeploymentID = types.Int64Null()
-		model.CurrentDeploymentStatus = types.StringNull()
 		model.EnvironmentVariableNames = types.ListNull(types.StringType)
 	}
 }

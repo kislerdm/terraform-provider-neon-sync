@@ -38,7 +38,6 @@ type neonTriggerResourceModel struct {
 	Prefix       types.String `tfsdk:"prefix"`
 	TriggerID    types.String `tfsdk:"trigger_id"`
 	Version      types.Int64  `tfsdk:"version"`
-	NextRunAt    types.String `tfsdk:"next_run_at"`
 	Inherited    types.Bool   `tfsdk:"inherited"`
 }
 
@@ -110,10 +109,6 @@ func (r *neonTriggerResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"version": schema.Int64Attribute{
 				Computed:    true,
 				Description: "Monotonic configuration version.",
-			},
-			"next_run_at": schema.StringAttribute{
-				Computed:    true,
-				Description: "Next scheduled occurrence as an RFC 3339 UTC timestamp. Null while disabled or inherited and not explicitly enabled on this branch.",
 			},
 			"inherited": schema.BoolAttribute{
 				Computed:    true,
@@ -478,11 +473,6 @@ func setNeonTriggerModelFromSchedule(model *neonTriggerResourceModel, st neon.Sc
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	if st.NextRunAt != "" {
-		model.NextRunAt = types.StringValue(st.NextRunAt)
-	} else {
-		model.NextRunAt = types.StringNull()
-	}
 	if st.Schedule.Cron != "" {
 		model.Cron = types.StringValue(st.Schedule.Cron)
 	} else {
@@ -500,7 +490,6 @@ func setNeonTriggerModelFromStorage(model *neonTriggerResourceModel, st neon.Sto
 	model.Enabled = types.BoolValue(st.Enabled)
 	model.Inherited = types.BoolValue(st.Inherited)
 	model.Version = types.Int64Value(st.Version)
-	model.NextRunAt = types.StringNull()
 	if st.StorageObjectCreated.BucketName != "" {
 		model.BucketName = types.StringValue(st.StorageObjectCreated.BucketName)
 	} else {
