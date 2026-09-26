@@ -173,6 +173,8 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonProjectMemberRoleResource,
 		NewNeonTriggerResource,
 		NewSnapshotResource,
+		NewNeonOrgMemberRoleResource,
+		NewNeonCustomBranchDomainResource,
 	}
 }
 

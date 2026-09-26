@@ -43,10 +43,12 @@ resource "neon_snapshot" "example" {
 - `created_at` (String) RFC 3339 timestamp at which the snapshot was created.
 - `diff_size` (Number) Incremental Postgres storage size in bytes since the previous scheduled snapshot.
 - `full_size` (Number) Full logical size of the snapshot in bytes at the time it was taken.
-- `id` (String) Composite ID of the form `<project_id>/<snapshot_id>`.
+- `id` (String) Composite ID of the form <project_id>/<snapshot_id>.
 - `manual` (Boolean) True if the snapshot was created manually rather than by a schedule.
 - `snapshot_id` (String) Server-generated snapshot identifier.
 - `source_branch_id` (String) Branch from which this snapshot was created.
+
+
 
 ## Import
 
@@ -60,12 +62,12 @@ For example:
 ```hcl
 import {
   to = neon_snapshot.example
-  id = "curly-poetry-30604233/snapshot-id"
+  id = "curly-poetry-30604233/snap-bitter-waterfall-b56bcnij"
 }
 ```
 
 Import using the command `terraform import`:
 
 ```commandline
-terraform import neon_snapshot.example "curly-poetry-30604233/snapshot-id"
+terraform import neon_snapshot.example "curly-poetry-30604233/snap-bitter-waterfall-b56bcnij"
 ```
