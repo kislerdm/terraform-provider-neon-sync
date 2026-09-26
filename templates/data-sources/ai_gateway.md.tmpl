@@ -1,0 +1,21 @@
+# neon_ai_gateway (Data Source)
+
+Reads the AI Gateway configuration for a Neon branch.
+
+## Example Usage
+
+```terraform
+{{ tffile "examples/data-sources/neon_ai_gateway/data-source.tf" }}
+```
+
+## Schema
+
+### Required
+
+- `branch_id` (String) The Neon branch ID.
+- `project_id` (String) The Neon project ID.
+
+### Read-Only
+
+- `base_url` (String) The OpenAI-compatible AI Gateway base URL for the branch.
+- `id` (String) The data source identifier in the form `<project_id>/<branch_id>`.
