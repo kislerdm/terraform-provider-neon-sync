@@ -24,12 +24,13 @@ type neonCustomBranchDomain struct {
 }
 
 type neonCustomBranchDomainModel struct {
-	ID         types.String `tfsdk:"id"`
-	ProjectID  types.String `tfsdk:"project_id"`
-	BranchID   types.String `tfsdk:"branch_id"`
-	Domain     types.String `tfsdk:"domain"`
-	EntityID   types.String `tfsdk:"entity_id"`
-	EntityType types.String `tfsdk:"entity_type"`
+	ID          types.String `tfsdk:"id"`
+	ProjectID   types.String `tfsdk:"project_id"`
+	BranchID    types.String `tfsdk:"branch_id"`
+	Domain      types.String `tfsdk:"domain"`
+	EntityID    types.String `tfsdk:"entity_id"`
+	EntityType  types.String `tfsdk:"entity_type"`
+	CnameTarget types.String `tfsdk:"cname_target"`
 }
 
 func NewNeonCustomBranchDomainResource() resource.Resource {
@@ -75,6 +76,11 @@ func (r *neonCustomBranchDomain) Schema(_ context.Context, _ resource.SchemaRequ
 				PlanModifiers: requiresReplace,
 				Description: "The target entity's identifier within the branch. " +
 					"For `function` this is the function slug (which must already exist on the branch).",
+			},
+			"cname_target": schema.StringAttribute{
+				Computed: true,
+				Description: "The CNAME target provided by Neon to configure DNS for the custom domain to point to the " +
+					"function.",
 			},
 		},
 	}
@@ -125,6 +131,8 @@ func (r *neonCustomBranchDomain) ImportState(ctx context.Context, req resource.I
 	case err == nil:
 		state.EntityID = types.StringValue(domain.EntityID)
 		state.EntityType = types.StringValue(domain.EntityType)
+		state.CnameTarget = types.StringValue(domain.CnameTarget)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 
 	case errors.As(err, &domainNotFoundErr{}):
 		resp.Diagnostics.AddError(err.Error(), "")
@@ -146,18 +154,17 @@ func (r *neonCustomBranchDomain) Create(ctx context.Context, req resource.Create
 		return
 	}
 
+	var respData neon.CustomDomain
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		_, err := r.client.RegisterProjectBranchCustomDomain(plan.ProjectID.ValueString(), plan.BranchID.ValueString(),
+		var err error
+		respData, err = r.client.RegisterProjectBranchCustomDomain(plan.ProjectID.ValueString(), plan.BranchID.ValueString(),
 			neon.CustomDomainRegisterRequest{
 				Domain:     plan.Domain.ValueString(),
 				EntityID:   plan.EntityID.ValueString(),
 				EntityType: plan.EntityType.ValueString(),
 			},
 		)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}, ctx)...)
 
 	if resp.Diagnostics.HasError() {
@@ -166,15 +173,13 @@ func (r *neonCustomBranchDomain) Create(ctx context.Context, req resource.Create
 
 	plan.ID = types.StringValue(fmt.Sprintf("%s/%s/%s", plan.ProjectID.ValueString(),
 		plan.BranchID.ValueString(), plan.Domain.ValueString()))
+	plan.CnameTarget = types.StringValue(respData.CnameTarget)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *neonCustomBranchDomain) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError(
-		"Neon Custom Branch Domain Update Not Supported",
-		"Changing custom branch domain attributes requires replacing the resource.",
-	)
+func (r *neonCustomBranchDomain) Update(_ context.Context, _ resource.UpdateRequest, _ *resource.UpdateResponse) {
+	return
 }
 
 func (r *neonCustomBranchDomain) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -197,6 +202,7 @@ func (r *neonCustomBranchDomain) Read(ctx context.Context, req resource.ReadRequ
 			state.BranchID.ValueString(), state.Domain.ValueString()))
 		state.EntityID = types.StringValue(domain.EntityID)
 		state.EntityType = types.StringValue(domain.EntityType)
+		state.CnameTarget = types.StringValue(domain.CnameTarget)
 
 	case errors.As(err, &domainNotFoundErr{}):
 		resp.Diagnostics.AddWarning(err.Error(), "")
@@ -235,6 +241,9 @@ func fundCustomBranchDomain(ctx context.Context, client *neon.Client, projectID,
 				}
 			}
 			if o.Domain != "" {
+				break
+			}
+			if l.CursorPaginationResponse.Pagination == nil {
 				break
 			}
 			cursor = l.CursorPaginationResponse.Pagination.Next

@@ -51,6 +51,7 @@ resource "neon_custom_branch_domain" "example" {
 
 ### Read-Only
 
+- `cname_target` (String) The CNAME target provided by Neon to configure DNS for the custom domain to point to the resource, e.g., Neon function.
 - `id` (String) The custom branch domain ID.
 
 
