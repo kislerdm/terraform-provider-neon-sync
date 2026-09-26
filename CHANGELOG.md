@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_branch`;
   - `neon_service_credential`.
 
+- Added the following data sources:
+  - `neon_ai_gateway`;
+
 ### Changed
 
 - Updated dependencies:
