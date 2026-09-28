@@ -49,7 +49,7 @@ func (r *neonOrgMemberRoleResource) Schema(_ context.Context, _ resource.SchemaR
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
-				Description: "The project member role ID.",
+				Description: "The org. member role ID.",
 			},
 			"org_id": schema.StringAttribute{
 				Required:      true,

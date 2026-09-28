@@ -33,7 +33,7 @@ resource "neon_org_member_role" "example" {
 
 ### Read-Only
 
-- `id` (String) The project member role ID.
+- `id` (String) The org. member role ID.
 
 
 
