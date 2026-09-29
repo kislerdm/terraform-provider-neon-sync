@@ -80,7 +80,7 @@ func (r *neonCustomBranchDomain) Schema(_ context.Context, _ resource.SchemaRequ
 			"cname_target": schema.StringAttribute{
 				Computed: true,
 				Description: "The CNAME target provided by Neon to configure DNS for the custom domain to point to the " +
-					"function.",
+					"resource, e.g., Neon function.",
 			},
 		},
 	}
