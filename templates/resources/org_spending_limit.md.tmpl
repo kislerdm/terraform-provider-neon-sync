@@ -1,0 +1,23 @@
+---
+page_title: "neon_org_spending_limit Resource - terraform-provider-neon"
+subcategory: ""
+description: |-
+  Manages an organization's monthly spending alert limit in cents.
+  The limit does not suspend computes when reached.
+---
+
+# neon_org_spending_limit (Resource)
+
+Manages an organization's monthly spending alert limit in cents.
+
+{{ tffile "examples/resources/neon_org_spending_limit/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import an organization spending limit using the organization ID.
+
+```shell
+terraform import neon_org_spending_limit.this <org_id>
+```

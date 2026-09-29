@@ -78,14 +78,7 @@ func TestAIGatewayDataSource(t *testing.T) {
 				),
 			},
 			{
-				// Spec scenario "AI Gateway unavailable": the data source
-				// targets a non-existent branch and must surface an
-				// actionable diagnostic rather than empty state. The
-				// framework wrapper emits "Neon API request failed" via
-				// projectReadiness.RetryFramework; the underlying SDK
-				// diagnostic [HTTP Code: 404][Error Code:
-				// AI_GATEWAY_NOT_ENABLED] is preserved in the detail.
-				Config: newAIGatewayConfig(projectName, orgID, `"00000000-0000-0000-0000-000000000000"`),
+				Config:      newAIGatewayConfig(projectName, orgID, `"00000000-0000-0000-0000-000000000000"`),
 				ExpectError: regexp.MustCompile("Neon API request failed"),
 			},
 		},

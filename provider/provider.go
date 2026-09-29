@@ -154,9 +154,6 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 	}
 
 	resp.ResourceData = &providerClient
-	// Framework data sources receive ProviderData via DataSourceData, not
-	// ResourceData. Without this, DataSource.ConfigureRequest.ProviderData
-	// is nil and every Read fails with "SDK is not configured".
 	resp.DataSourceData = &providerClient
 }
 
@@ -174,6 +171,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonTriggerResource,
 		NewSnapshotResource,
 		NewNeonOrgMemberRoleResource,
+		NewNeonOrgSpendingLimitResource,
 		NewNeonCustomBranchDomainResource,
 	}
 }
