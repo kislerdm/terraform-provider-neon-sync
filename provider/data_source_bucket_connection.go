@@ -9,14 +9,14 @@ import (
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-var _ datasource.DataSource = (*neonBranchStorageDataSource)(nil)
-var _ datasource.DataSourceWithConfigure = (*neonBranchStorageDataSource)(nil)
+var _ datasource.DataSource = (*neonBucketConnectionDataSource)(nil)
+var _ datasource.DataSourceWithConfigure = (*neonBucketConnectionDataSource)(nil)
 
-type neonBranchStorageDataSource struct {
+type neonBucketConnectionDataSource struct {
 	client *neon.Client
 }
 
-type neonBranchStorageDataSourceModel struct {
+type neonBucketConnectionDataSourceModel struct {
 	ID             types.String `tfsdk:"id"`
 	ProjectID      types.String `tfsdk:"project_id"`
 	BranchID       types.String `tfsdk:"branch_id"`
@@ -25,17 +25,17 @@ type neonBranchStorageDataSourceModel struct {
 	ForcePathStyle types.Bool   `tfsdk:"force_path_style"`
 }
 
-func NewBranchStorageDataSource() datasource.DataSource {
-	return &neonBranchStorageDataSource{}
+func NewBucketConnectionDataSource() datasource.DataSource {
+	return &neonBucketConnectionDataSource{}
 }
 
-func (d *neonBranchStorageDataSource) Metadata(_ context.Context, _ datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = "neon_branch_storage"
+func (d *neonBucketConnectionDataSource) Metadata(_ context.Context, _ datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = "neon_bucket_connection"
 }
 
-func (d *neonBranchStorageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *neonBucketConnectionDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads the S3-compatible connection details for branchable object storage on a Neon branch.",
+		Description: "Reads the S3-compatible connection details for buckets on a Neon branch.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -59,13 +59,13 @@ func (d *neonBranchStorageDataSource) Schema(_ context.Context, _ datasource.Sch
 			},
 			"force_path_style": schema.BoolAttribute{
 				Computed:    true,
-				Description: "Whether the S3 client must use path-style addressing (bucket-in-path rather than virtual-hosted subdomain). Always true for Neon branch storage.",
+				Description: "Whether the S3 client must use path-style addressing (bucket-in-path rather than virtual-hosted subdomain). Always true for Neon buckets.",
 			},
 		},
 	}
 }
 
-func (d *neonBranchStorageDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *neonBucketConnectionDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -84,8 +84,8 @@ func (d *neonBranchStorageDataSource) Configure(_ context.Context, req datasourc
 	d.client = client.sdk
 }
 
-func (d *neonBranchStorageDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var data neonBranchStorageDataSourceModel
+func (d *neonBucketConnectionDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var data neonBucketConnectionDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return

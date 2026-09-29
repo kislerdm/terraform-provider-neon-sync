@@ -179,7 +179,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewAIGatewayDataSource,
-		NewBranchStorageDataSource,
+		NewBucketConnectionDataSource,
 	}
 }
 

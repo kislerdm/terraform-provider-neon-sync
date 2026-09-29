@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the following data sources:
   - `neon_ai_gateway`;
-  - `neon_branch_storage`;
+  - `neon_bucket_connection`;
 
 ### Changed
 

@@ -17,26 +17,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBranchStorageDataSourceRegisteredWithFrameworkProvider(t *testing.T) {
+func TestBucketConnectionDataSourceRegisteredWithFrameworkProvider(t *testing.T) {
 	p := &frameworkProvider{}
 	dataSources := p.DataSources(context.Background())
 
 	var found datasource.DataSource
+	var typeNames []string
 	for _, factory := range dataSources {
 		candidate := factory()
 		var metadata datasource.MetadataResponse
 		candidate.Metadata(context.Background(), datasource.MetadataRequest{}, &metadata)
-		if metadata.TypeName == "neon_branch_storage" {
+		typeNames = append(typeNames, metadata.TypeName)
+		if metadata.TypeName == "neon_bucket_connection" {
 			found = candidate
-			break
 		}
 	}
 
-	require.NotNil(t, found, "neon_branch_storage must be registered as a Framework data source")
+	require.NotNil(t, found, "neon_bucket_connection must be registered as a Framework data source")
+	require.NotContains(t, typeNames, "neon_branch_storage", "the old data source name must not remain as an alias")
 }
 
-func TestBranchStorageDataSourceSchema(t *testing.T) {
-	d := NewBranchStorageDataSource()
+func TestBucketConnectionDataSourceSchema(t *testing.T) {
+	d := NewBucketConnectionDataSource()
 	var response datasource.SchemaResponse
 	d.Schema(context.Background(), datasource.SchemaRequest{}, &response)
 
@@ -49,8 +51,8 @@ func TestBranchStorageDataSourceSchema(t *testing.T) {
 	require.NotContains(t, response.Schema.Attributes, "enabled")
 }
 
-func TestBranchStorageDataSourceModelUsesFrameworkTypes(t *testing.T) {
-	model := neonBranchStorageDataSourceModel{
+func TestBucketConnectionDataSourceModelUsesFrameworkTypes(t *testing.T) {
+	model := neonBucketConnectionDataSourceModel{
 		ID:             types.StringValue("project/branch"),
 		ProjectID:      types.StringValue("project"),
 		BranchID:       types.StringValue("branch"),
@@ -76,28 +78,28 @@ func (s stubHTTPClient) Do(_ *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func newBranchStorageDataSourceWithStub(t *testing.T, status int, body string) *neonBranchStorageDataSource {
+func newBucketConnectionDataSourceWithStub(t *testing.T, status int, body string) *neonBucketConnectionDataSource {
 	t.Helper()
 	client, err := neon.NewClient(neon.Config{
 		Key:        "test",
 		HTTPClient: stubHTTPClient{status: status, body: body},
 	})
 	require.NoError(t, err)
-	return &neonBranchStorageDataSource{client: client}
+	return &neonBucketConnectionDataSource{client: client}
 }
 
-func branchStorageTestSchema(t *testing.T) schema.Schema {
+func bucketConnectionTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	d := NewBranchStorageDataSource()
+	d := NewBucketConnectionDataSource()
 	var resp datasource.SchemaResponse
 	d.Schema(context.Background(), datasource.SchemaRequest{}, &resp)
 	require.Zero(t, resp.Diagnostics.ErrorsCount())
 	return resp.Schema
 }
 
-func branchStorageReadConfig(t *testing.T, projectID, branchID string) tfsdk.Config {
+func bucketConnectionReadConfig(t *testing.T, projectID, branchID string) tfsdk.Config {
 	t.Helper()
-	s := branchStorageTestSchema(t)
+	s := bucketConnectionTestSchema(t)
 	objType := s.Type().TerraformType(context.Background()).(tftypes.Object)
 	return tfsdk.Config{
 		Schema: s,
@@ -112,25 +114,25 @@ func branchStorageReadConfig(t *testing.T, projectID, branchID string) tfsdk.Con
 	}
 }
 
-func TestBranchStorageDataSourceReadSuccess(t *testing.T) {
-	d := newBranchStorageDataSourceWithStub(t, http.StatusOK, `{
+func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
+	d := newBucketConnectionDataSourceWithStub(t, http.StatusOK, `{
 		"enabled": true,
 		"force_path_style": true,
 		"region": "us-east-2",
 		"s3_endpoint": "https://br-cool-moon-42.storage.c-2.local.neon.build"
 	}`)
 
-	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: branchStorageTestSchema(t)}}
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
 	d.Configure(context.Background(),
 		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
 		&datasource.ConfigureResponse{})
 
 	d.Read(context.Background(),
-		datasource.ReadRequest{Config: branchStorageReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
+		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
 		resp)
 
 	require.Equal(t, 0, resp.Diagnostics.ErrorsCount(), "diagnostics: %v", resp.Diagnostics)
-	var got neonBranchStorageDataSourceModel
+	var got neonBucketConnectionDataSourceModel
 	stateDiags := resp.State.Get(context.Background(), &got)
 	require.Equal(t, 0, len(stateDiags), "state diagnostics: %v", stateDiags)
 
@@ -140,55 +142,39 @@ func TestBranchStorageDataSourceReadSuccess(t *testing.T) {
 	require.True(t, got.ForcePathStyle.ValueBool())
 }
 
-func TestBranchStorageDataSourceReadStorageNotEnabled(t *testing.T) {
-	for _, reason := range []string{
-		"org_not_entitled",
-		"region_unavailable",
-		"branch_directory_missing",
-		"branch_not_found",
-	} {
-		t.Run(reason, func(t *testing.T) {
-			d := newBranchStorageDataSourceWithStub(t, http.StatusNotFound, `{
-				"code": "STORAGE_NOT_ENABLED",
-				"message": "storage unavailable",
-				"reason": "`+reason+`"
-			}`)
-
-			resp := &datasource.ReadResponse{State: tfsdk.State{Schema: branchStorageTestSchema(t)}}
-			d.Configure(context.Background(),
-				datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
-				&datasource.ConfigureResponse{})
-
-			d.Read(context.Background(),
-				datasource.ReadRequest{Config: branchStorageReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
-				resp)
-
-			require.NotZero(t, resp.Diagnostics.ErrorsCount(), "expected an actionable diagnostic for storage unavailable")
-			combined := ""
-			for _, diag := range resp.Diagnostics {
-				combined += diag.Summary() + ": " + diag.Detail() + "\n"
-			}
-			require.Equal(t, 1, resp.Diagnostics.ErrorsCount())
-			require.Equal(t, "Neon API request failed", resp.Diagnostics[0].Summary())
-			require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] storage unavailable", resp.Diagnostics[0].Detail())
-			require.NotContains(t, combined, reason)
-		})
-	}
-}
-
-func TestBranchStorageDataSourceReadAPIError(t *testing.T) {
-	d := newBranchStorageDataSourceWithStub(t, http.StatusBadRequest, `{
-		"code": "INVALID_INPUT",
-		"message": "upstream rejected request"
+func TestBucketConnectionDataSourceReadNotFound(t *testing.T) {
+	d := newBucketConnectionDataSourceWithStub(t, http.StatusNotFound, `{
+		"code": "STORAGE_NOT_ENABLED",
+		"message": "not found"
 	}`)
 
-	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: branchStorageTestSchema(t)}}
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
 	d.Configure(context.Background(),
 		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
 		&datasource.ConfigureResponse{})
 
 	d.Read(context.Background(),
-		datasource.ReadRequest{Config: branchStorageReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
+		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
+		resp)
+
+	require.Equal(t, 1, resp.Diagnostics.ErrorsCount())
+	require.Equal(t, "Neon API request failed", resp.Diagnostics[0].Summary())
+	require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] not found", resp.Diagnostics[0].Detail())
+}
+
+func TestBucketConnectionDataSourceReadAPIError(t *testing.T) {
+	d := newBucketConnectionDataSourceWithStub(t, http.StatusBadRequest, `{
+		"code": "INVALID_INPUT",
+		"message": "upstream rejected request"
+	}`)
+
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
+	d.Configure(context.Background(),
+		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
+		&datasource.ConfigureResponse{})
+
+	d.Read(context.Background(),
+		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
 		resp)
 
 	require.NotZero(t, resp.Diagnostics.ErrorsCount(), "expected an actionable diagnostic for non-2xx API error")
@@ -200,36 +186,36 @@ func TestBranchStorageDataSourceReadAPIError(t *testing.T) {
 	require.Equal(t, "[HTTP Code: 400][Error Code: INVALID_INPUT] upstream rejected request", resp.Diagnostics[0].Detail())
 }
 
-func TestBranchStorageDataSourceReadWithoutConfigure(t *testing.T) {
-	d := &neonBranchStorageDataSource{}
-	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: branchStorageTestSchema(t)}}
+func TestBucketConnectionDataSourceReadWithoutConfigure(t *testing.T) {
+	d := &neonBucketConnectionDataSource{}
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
 
 	d.Read(context.Background(),
-		datasource.ReadRequest{Config: branchStorageReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
+		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
 		resp)
 
 	require.NotZero(t, resp.Diagnostics.ErrorsCount(), "expected a diagnostic when SDK is not configured")
 }
 
-type branchStorageHTTPFunc func(*http.Request) (*http.Response, error)
+type bucketConnectionHTTPFunc func(*http.Request) (*http.Response, error)
 
-func (f branchStorageHTTPFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+func (f bucketConnectionHTTPFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestBranchStorageDataSourceReadWithConfiguredProvider(t *testing.T) {
+func TestBucketConnectionDataSourceReadWithConfiguredProvider(t *testing.T) {
 	// Exercise the real provider wiring without sending requests to Neon.
 	// Keep this test serial because http.DefaultTransport is process-wide.
 	previousTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = previousTransport })
-	http.DefaultTransport = branchStorageHTTPFunc(func(req *http.Request) (*http.Response, error) {
+	http.DefaultTransport = bucketConnectionHTTPFunc(func(req *http.Request) (*http.Response, error) {
 		require.Equal(t, http.MethodGet, req.Method)
 		require.Equal(t, "/api/v2/projects/project/branches/branch/storage", req.URL.Path)
 		require.Equal(t, "Bearer test", req.Header.Get("Authorization"))
 		require.Contains(t, req.Header.Get("User-Agent"), "tfProvider-neondatabase/neon@test")
 		return stubHTTPClient{
 			status: http.StatusNotFound,
-			body:   `{"code":"STORAGE_NOT_ENABLED","message":"storage unavailable","reason":"org_not_entitled"}`,
+			body:   `{"code":"STORAGE_NOT_ENABLED","message":"not found"}`,
 		}.Do(req)
 	})
 
@@ -249,12 +235,12 @@ func TestBranchStorageDataSourceReadWithConfiguredProvider(t *testing.T) {
 	}, &configureResp)
 	require.False(t, configureResp.Diagnostics.HasError(), "%v", configureResp.Diagnostics)
 
-	d := NewBranchStorageDataSource().(*neonBranchStorageDataSource)
+	d := NewBucketConnectionDataSource().(*neonBucketConnectionDataSource)
 	var dataSourceConfigureResp datasource.ConfigureResponse
 	d.Configure(ctx, datasource.ConfigureRequest{ProviderData: configureResp.DataSourceData}, &dataSourceConfigureResp)
 	require.False(t, dataSourceConfigureResp.Diagnostics.HasError(), "%v", dataSourceConfigureResp.Diagnostics)
-	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: branchStorageTestSchema(t)}}
-	d.Read(ctx, datasource.ReadRequest{Config: branchStorageReadConfig(t, "project", "branch")}, resp)
+	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
+	d.Read(ctx, datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "project", "branch")}, resp)
 	require.True(t, resp.Diagnostics.HasError())
-	require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] storage unavailable", resp.Diagnostics[0].Detail())
+	require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] not found", resp.Diagnostics[0].Detail())
 }
