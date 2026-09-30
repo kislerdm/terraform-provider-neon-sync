@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	frameworkprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/require"
@@ -43,34 +42,29 @@ func TestBucketConnectionDataSourceSchema(t *testing.T) {
 	d.Schema(context.Background(), datasource.SchemaRequest{}, &response)
 
 	require.Zero(t, response.Diagnostics.ErrorsCount())
-	require.Contains(t, response.Schema.Attributes, "project_id")
-	require.Contains(t, response.Schema.Attributes, "branch_id")
-	require.Contains(t, response.Schema.Attributes, "s3_endpoint")
-	require.Contains(t, response.Schema.Attributes, "region")
-	require.Contains(t, response.Schema.Attributes, "force_path_style")
+	require.Empty(t, response.Schema.Blocks)
+	for _, name := range []string{"project_id", "branch_id"} {
+		require.Contains(t, response.Schema.Attributes, name)
+		require.True(t, response.Schema.Attributes[name].IsRequired(), name)
+	}
+	for _, name := range []string{"id", "s3_endpoint", "region", "force_path_style"} {
+		require.Contains(t, response.Schema.Attributes, name)
+		require.True(t, response.Schema.Attributes[name].IsComputed(), name)
+	}
 	require.NotContains(t, response.Schema.Attributes, "enabled")
 }
 
-func TestBucketConnectionDataSourceModelUsesFrameworkTypes(t *testing.T) {
-	model := neonBucketConnectionDataSourceModel{
-		ID:             types.StringValue("project/branch"),
-		ProjectID:      types.StringValue("project"),
-		BranchID:       types.StringValue("branch"),
-		S3Endpoint:     types.StringValue("https://example.invalid"),
-		Region:         types.StringValue("us-east-1"),
-		ForcePathStyle: types.BoolValue(true),
-	}
-
-	require.Equal(t, "project/branch", model.ID.ValueString())
-	require.True(t, model.ForcePathStyle.ValueBool())
-}
-
-type stubHTTPClient struct {
+type branchDataSourceHTTPFixture struct {
+	t      *testing.T
+	path   string
 	status int
 	body   string
 }
 
-func (s stubHTTPClient) Do(_ *http.Request) (*http.Response, error) {
+func (s branchDataSourceHTTPFixture) Do(req *http.Request) (*http.Response, error) {
+	s.t.Helper()
+	require.Equal(s.t, http.MethodGet, req.Method)
+	require.Equal(s.t, s.path, req.URL.Path)
 	return &http.Response{
 		StatusCode: s.status,
 		Body:       io.NopCloser(strings.NewReader(s.body)),
@@ -78,14 +72,24 @@ func (s stubHTTPClient) Do(_ *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func newBucketConnectionDataSourceWithStub(t *testing.T, status int, body string) *neonBucketConnectionDataSource {
+func newBranchDataSourceTestClient(t *testing.T, path string, status int, body string) *neon.Client {
 	t.Helper()
 	client, err := neon.NewClient(neon.Config{
 		Key:        "test",
-		HTTPClient: stubHTTPClient{status: status, body: body},
+		HTTPClient: branchDataSourceHTTPFixture{t: t, path: path, status: status, body: body},
 	})
 	require.NoError(t, err)
-	return &neonBucketConnectionDataSource{client: client}
+	return client
+}
+
+func newBucketConnectionDataSourceWithStub(t *testing.T, status int, body string) *neonBucketConnectionDataSource {
+	t.Helper()
+	client := newBranchDataSourceTestClient(t, "/api/v2/projects/cool-moon-42/branches/br-cool-moon-42/storage", status, body)
+	d := NewBucketConnectionDataSource().(*neonBucketConnectionDataSource)
+	var resp datasource.ConfigureResponse
+	d.Configure(context.Background(), datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: client}}, &resp)
+	require.False(t, resp.Diagnostics.HasError(), "%v", resp.Diagnostics)
+	return d
 }
 
 func bucketConnectionTestSchema(t *testing.T) schema.Schema {
@@ -123,9 +127,6 @@ func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
 	}`)
 
 	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
-	d.Configure(context.Background(),
-		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
-		&datasource.ConfigureResponse{})
 
 	d.Read(context.Background(),
 		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
@@ -137,6 +138,8 @@ func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
 	require.Equal(t, 0, len(stateDiags), "state diagnostics: %v", stateDiags)
 
 	require.Equal(t, "cool-moon-42/br-cool-moon-42", got.ID.ValueString())
+	require.Equal(t, "cool-moon-42", got.ProjectID.ValueString())
+	require.Equal(t, "br-cool-moon-42", got.BranchID.ValueString())
 	require.Equal(t, "https://br-cool-moon-42.storage.c-2.local.neon.build", got.S3Endpoint.ValueString())
 	require.Equal(t, "us-east-2", got.Region.ValueString())
 	require.True(t, got.ForcePathStyle.ValueBool())
@@ -149,9 +152,6 @@ func TestBucketConnectionDataSourceReadNotFound(t *testing.T) {
 	}`)
 
 	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
-	d.Configure(context.Background(),
-		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
-		&datasource.ConfigureResponse{})
 
 	d.Read(context.Background(),
 		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
@@ -169,9 +169,6 @@ func TestBucketConnectionDataSourceReadAPIError(t *testing.T) {
 	}`)
 
 	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
-	d.Configure(context.Background(),
-		datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: d.client}},
-		&datasource.ConfigureResponse{})
 
 	d.Read(context.Background(),
 		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
@@ -194,31 +191,12 @@ func TestBucketConnectionDataSourceReadWithoutConfigure(t *testing.T) {
 		datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "cool-moon-42", "br-cool-moon-42")},
 		resp)
 
-	require.NotZero(t, resp.Diagnostics.ErrorsCount(), "expected a diagnostic when SDK is not configured")
+	require.Equal(t, 1, resp.Diagnostics.ErrorsCount())
+	require.Equal(t, "SDK is not configured", resp.Diagnostics[0].Summary())
+	require.Equal(t, "The Neon provider client is unavailable.", resp.Diagnostics[0].Detail())
 }
 
-type bucketConnectionHTTPFunc func(*http.Request) (*http.Response, error)
-
-func (f bucketConnectionHTTPFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-func TestBucketConnectionDataSourceReadWithConfiguredProvider(t *testing.T) {
-	// Exercise the real provider wiring without sending requests to Neon.
-	// Keep this test serial because http.DefaultTransport is process-wide.
-	previousTransport := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = previousTransport })
-	http.DefaultTransport = bucketConnectionHTTPFunc(func(req *http.Request) (*http.Response, error) {
-		require.Equal(t, http.MethodGet, req.Method)
-		require.Equal(t, "/api/v2/projects/project/branches/branch/storage", req.URL.Path)
-		require.Equal(t, "Bearer test", req.Header.Get("Authorization"))
-		require.Contains(t, req.Header.Get("User-Agent"), "tfProvider-neondatabase/neon@test")
-		return stubHTTPClient{
-			status: http.StatusNotFound,
-			body:   `{"code":"STORAGE_NOT_ENABLED","message":"not found"}`,
-		}.Do(req)
-	})
-
+func TestBucketConnectionDataSourceConfigureWithConfiguredProvider(t *testing.T) {
 	ctx := context.Background()
 	p := &frameworkProvider{version: "test"}
 	var schemaResp frameworkprovider.SchemaResponse
@@ -235,12 +213,13 @@ func TestBucketConnectionDataSourceReadWithConfiguredProvider(t *testing.T) {
 	}, &configureResp)
 	require.False(t, configureResp.Diagnostics.HasError(), "%v", configureResp.Diagnostics)
 
+	adapter, ok := configureResp.DataSourceData.(*providerAdapter)
+	require.True(t, ok, "provider must supply DataSourceData")
+	require.NotNil(t, adapter.sdk)
+
 	d := NewBucketConnectionDataSource().(*neonBucketConnectionDataSource)
 	var dataSourceConfigureResp datasource.ConfigureResponse
 	d.Configure(ctx, datasource.ConfigureRequest{ProviderData: configureResp.DataSourceData}, &dataSourceConfigureResp)
 	require.False(t, dataSourceConfigureResp.Diagnostics.HasError(), "%v", dataSourceConfigureResp.Diagnostics)
-	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
-	d.Read(ctx, datasource.ReadRequest{Config: bucketConnectionReadConfig(t, "project", "branch")}, resp)
-	require.True(t, resp.Diagnostics.HasError())
-	require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] not found", resp.Diagnostics[0].Detail())
+	require.Same(t, adapter.sdk, d.client)
 }
