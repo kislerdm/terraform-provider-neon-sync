@@ -93,7 +93,8 @@ var _ frameworkprovider.Provider = (*frameworkProvider)(nil)
 // frameworkProvider is the Framework portion of the provider. It is served
 // through terraform-plugin-mux alongside the legacy SDK provider.
 type frameworkProvider struct {
-	version string
+	version     string
+	neonAdapter *providerAdapter
 }
 
 type frameworkProviderConfigModel struct {
@@ -127,6 +128,12 @@ type providerAdapter struct {
 
 func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider.ConfigureRequest,
 	resp *frameworkprovider.ConfigureResponse) {
+	if p.neonAdapter != nil {
+		resp.ResourceData = p.neonAdapter
+		resp.DataSourceData = p.neonAdapter
+		return
+	}
+
 	var config frameworkProviderConfigModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
@@ -180,6 +187,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 	return []func() datasource.DataSource{
 		NewAIGatewayDataSource,
 		NewBucketConnectionDataSource,
+		NewActiveRegionsDataSource,
 	}
 }
 
@@ -202,6 +210,15 @@ func newProviderFactories() map[string]func() (tfprotov6.ProviderServer, error) 
 	return map[string]func() (tfprotov6.ProviderServer, error){
 		"neon": func() (tfprotov6.ProviderServer, error) {
 			return NewServer("accTest")
+		},
+	}
+}
+
+func newUnitTestProviderFactories(neonAdapter *providerAdapter) map[string]func() (tfprotov6.ProviderServer, error) {
+	return map[string]func() (tfprotov6.ProviderServer, error){
+		"neon": func() (tfprotov6.ProviderServer, error) {
+			p := &frameworkProvider{version: "unitTest", neonAdapter: neonAdapter}
+			return providerserver.NewProtocol6(p)(), nil
 		},
 	}
 }
