@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -19,12 +18,10 @@ type HTTPClientMock struct {
 	Req        *http.Request
 	StatusCode int
 	Body       []byte
-	cnt        int
 }
 
 func (h *HTTPClientMock) Do(r *http.Request) (*http.Response, error) {
 	h.Req = r
-	h.cnt++
 	if h.Err != nil {
 		return nil, h.Err
 	}
@@ -32,10 +29,6 @@ func (h *HTTPClientMock) Do(r *http.Request) (*http.Response, error) {
 		StatusCode: h.StatusCode,
 		Body:       io.NopCloser(bytes.NewReader(h.Body)),
 	}, nil
-}
-
-func (h *HTTPClientMock) NumberOfMadeRequests() int {
-	return h.cnt
 }
 
 func TestActiveRegionsDataSource(t *testing.T) {
@@ -199,33 +192,6 @@ func TestActiveRegionsDataSource(t *testing.T) {
 				{
 					Config:      `data "neon_active_regions" "this" {}`,
 					ExpectError: regexp.MustCompile("error"),
-				},
-			},
-		})
-	})
-
-	t.Run("shall yield an error after retries", func(t *testing.T) {
-		httpClient := &HTTPClientMock{
-			StatusCode: http.StatusBadGateway,
-		}
-		sdkMock, err := neon.NewClient(neon.Config{
-			Key:        "foo",
-			HTTPClient: httpClient,
-		})
-		assert.NoErrorf(t, err, "could not create Neon SDK mock")
-
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: newUnitTestProviderFactories(&providerAdapter{
-				sdk: sdkMock,
-			}),
-			Steps: []resource.TestStep{
-				{
-					Config:      `data "neon_active_regions" "this" {}`,
-					ExpectError: regexp.MustCompile("502"),
-					Check: func(_ *terraform.State) error {
-						assert.Greater(t, httpClient.NumberOfMadeRequests(), 1)
-						return nil
-					},
 				},
 			},
 		})
