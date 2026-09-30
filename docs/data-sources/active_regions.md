@@ -48,6 +48,3 @@ Read-Only:
 - `default` (Boolean) Whether the region is the default.
 - `name` (String) The name of the Neon region.
 - `region_id` (String) The ID of the Neon region.
-
-
-
