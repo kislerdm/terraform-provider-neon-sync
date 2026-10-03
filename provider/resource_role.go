@@ -34,7 +34,6 @@ type neonRoleResourceModel struct {
 
 func (m *neonRoleResourceModel) inferAttr(role neon.Role) {
 	m.ID = typesTFSDK.StringValue(m.ProjectID.ValueString() + "/" + role.BranchID + "/" + role.Name)
-	m.BranchID = typesTFSDK.StringValue(role.BranchID)
 	m.Name = typesTFSDK.StringValue(role.Name)
 	m.Password = typesTFSDK.StringPointerValue(role.Password)
 	m.Protected = typesTFSDK.BoolPointerValue(role.Protected)
@@ -255,6 +254,7 @@ func (r neonRole) ImportState(ctx context.Context, req resource.ImportStateReque
 
 	var state neonRoleResourceModel
 	state.ProjectID = typesTFSDK.StringValue(projectID)
+	state.BranchID = typesTFSDK.StringValue(branchID)
 	state.inferAttr(role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
