@@ -2,279 +2,404 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	schemaTFSDK "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	typesTFSDK "github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
-	"github.com/neondatabase/terraform-provider-neon/provider/types"
 )
 
-func resourceBranch() *schema.Resource {
-	return &schema.Resource{
-		Description:   "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
-		SchemaVersion: 8,
-		Importer: &schema.ResourceImporter{
-			StateContext: resourceBranchImport,
-		},
-		CreateContext: resourceBranchCreateRetry,
-		ReadContext:   resourceBranchReadRetry,
-		UpdateContext: resourceBranchUpdateRetry,
-		DeleteContext: resourceBranchDeleteRetry,
-		Schema: map[string]*schema.Schema{
-			"project_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				Description: "Project ID.",
-			},
-			"id": {
-				Type:        schema.TypeString,
+var _ resource.ResourceWithConfigure = (*neonBranchResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*neonBranchResource)(nil)
+var _ resource.ResourceWithImportState = (*neonBranchResource)(nil)
+
+type neonBranchResource struct {
+	client *neon.Client
+}
+
+type neonBranchResourceModel struct {
+	ID              typesTFSDK.String `tfsdk:"id"`
+	ProjectID       typesTFSDK.String `tfsdk:"project_id"`
+	Name            typesTFSDK.String `tfsdk:"name"`
+	ParentID        typesTFSDK.String `tfsdk:"parent_id"`
+	ParentLsn       typesTFSDK.String `tfsdk:"parent_lsn"`
+	ParentTimestamp typesTFSDK.Int64  `tfsdk:"parent_timestamp"`
+	LogicalSize     typesTFSDK.Int64  `tfsdk:"logical_size"`
+	Protected       typesTFSDK.Bool   `tfsdk:"protected"`
+	// TODO: add annotations as map[string]any
+}
+
+func (v *neonBranchResourceModel) inferAttr(branch neon.Branch) {
+	v.ID = typesTFSDK.StringValue(branch.ID)
+	v.ProjectID = typesTFSDK.StringValue(branch.ProjectID)
+	v.Name = typesTFSDK.StringValue(branch.Name)
+	v.ParentID = typesTFSDK.StringPointerValue(branch.ParentID)
+	v.ParentLsn = typesTFSDK.StringPointerValue(branch.ParentLsn)
+	var parentTimestamp int64
+	if branch.ParentTimestamp != nil {
+		parentTimestamp = branch.ParentTimestamp.Unix()
+	}
+	v.ParentTimestamp = typesTFSDK.Int64Value(parentTimestamp)
+	v.Protected = typesTFSDK.BoolValue(branch.Protected)
+	v.LogicalSize = typesTFSDK.Int64PointerValue(branch.LogicalSize)
+}
+
+func NewNeonBranchResource() resource.Resource {
+	return &neonBranchResource{}
+}
+
+func (r *neonBranchResource) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "neon_branch"
+}
+
+func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+
+	resp.Schema = schemaTFSDK.Schema{
+		Description: "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
+		Attributes: map[string]schemaTFSDK.Attribute{
+			"id": schemaTFSDK.StringAttribute{
 				Computed:    true,
-				Description: "Branch ID.",
+				Description: "The Neon branch ID.",
 			},
-			"name": {
-				Type:        schema.TypeString,
+			"project_id": schemaTFSDK.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The Neon project ID",
+			},
+			"name": schemaTFSDK.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Branch name.",
+				Description: "The branch name.",
 			},
-			"parent_id": {
-				Type:        schema.TypeString,
+			"parent_id": schemaTFSDK.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "ID of the branch to check out.",
+				Description: "The ID of the branch to check out.",
 			},
-			"parent_lsn": {
-				Type:          schema.TypeString,
-				Optional:      true,
-				Computed:      true,
-				ForceNew:      true,
-				ConflictsWith: []string{"parent_timestamp"},
+			"parent_lsn": schemaTFSDK.StringAttribute{
+				Optional: true,
+				Computed: true,
 				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn`,
+See details: https://neon.tech/docs/reference/glossary/#lsn
+**Conflicts with parent_timestamp**.`,
 			},
-			"parent_timestamp": {
-				Type:          schema.TypeInt,
-				Optional:      true,
-				Computed:      true,
-				ForceNew:      true,
-				ValidateFunc:  intValidationNotNegative,
-				ConflictsWith: []string{"parent_lsn"},
-				Description: `Timestamp horizon for the data to be present in the new branch.
-**Note**: it's defined as Unix epoch.`,
+			"parent_timestamp": schemaTFSDK.Int64Attribute{
+				Optional:   true,
+				Computed:   true,
+				Validators: []validator.Int64{notNegativeInt64},
+				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+See details: https://neon.tech/docs/reference/glossary/#lsn
+**Conflicts with parent_lsn**.`,
 			},
-			"logical_size": {
-				Type:        schema.TypeInt,
+			"logical_size": schemaTFSDK.Int64Attribute{
 				Computed:    true,
 				Description: "Branch logical size in MB.",
 			},
-			"protected": types.NewOptionalTristateBool(
-				`Set whether the branch is protected.`, false,
-			),
+			"protected": schemaTFSDK.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Set whether the branch is protected.",
+			},
 		},
 	}
 }
 
-func updateStateBranch(d *schema.ResourceData, v neon.Branch) error {
-	if err := d.Set("name", v.Name); err != nil {
-		return err
+func (r *neonBranchResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
 	}
-	if err := d.Set("parent_id", v.ParentID); err != nil {
-		return err
+
+	client, ok := req.ProviderData.(*providerAdapter)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type", "Expected *providerAdapter, got an unexpected type.")
+		return
 	}
-	if err := d.Set("parent_lsn", v.ParentLsn); err != nil {
-		return err
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
 	}
-	if v.ParentTimestamp != nil {
-		if err := d.Set("parent_timestamp", int(v.ParentTimestamp.Unix())); err != nil {
-			return err
-		}
-	}
-	if v.LogicalSize != nil {
-		if err := d.Set("logical_size", int(*v.LogicalSize)); err != nil {
-			return err
-		}
-	}
-	if _, ok := d.GetOk("protected"); ok || v.Protected {
-		if err := types.SetTristateBool(d, "protected", &v.Protected); err != nil {
-			return err
-		}
-	}
-	return nil
+	r.client = client.sdk
 }
 
-func resourceBranchCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceBranchCreate, ctx, d, meta)
-}
+func (r *neonBranchResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
 
-func resourceBranchReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceBranchRead, ctx, d, meta,
-		map[int]FallbackFn{
-			http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-				tflog.Debug(ctx, "branch not found, removing from state",
-					map[string]interface{}{"project_id": d.Get("project_id"), "branch_id": d.Id()})
-				d.SetId("")
-				return nil
-			}})
-}
+	var state neonBranchResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-func resourceBranchUpdateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceBranchUpdate, ctx, d, meta)
-}
-
-func resourceBranchDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceBranchDelete, ctx, d, meta, map[int]FallbackFn{
-		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
-			return nil
-		},
-		http.StatusUnprocessableEntity: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
-			return nil
-		},
-	})
-}
-
-func resourceBranchCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "created Branch")
-	tflog.Debug(ctx, "create Branch.", map[string]interface{}{"projectID": d.Get("project_id")})
-
-	cfg := neon.CreateProjectBranchCfg{
+	cfg := &neon.CreateProjectBranchCfg{
 		BranchCreateRequest: neon.BranchCreateRequest{
 			Branch: &neon.BranchCreateRequestBranch{
-				Name:      pointer(d.Get("name").(string)),
-				ParentID:  pointer(d.Get("parent_id").(string)),
-				ParentLsn: pointer(d.Get("parent_lsn").(string)),
-				Protected: types.GetTristateBool(d, "protected"),
+				Name:      state.Name.ValueStringPointer(),
+				ParentID:  state.ParentID.ValueStringPointer(),
+				ParentLsn: state.ParentLsn.ValueStringPointer(),
+				Protected: state.Protected.ValueBoolPointer(),
 			},
 		},
 	}
 
-	if v, ok := d.GetOk("parent_timestamp"); ok && v.(int) > 0 {
-		t := time.Unix(int64(v.(int)), 0)
-		cfg.Branch.ParentTimestamp = &t
+	if state.ParentTimestamp.ValueInt64() != 0 {
+		parentTimestamp := time.Unix(state.ParentTimestamp.ValueInt64(), 0)
+		cfg.BranchCreateRequest.Branch.ParentTimestamp = &parentTimestamp
 	}
 
-	client := meta.(*neon.Client)
-	resp, err := client.CreateProjectBranch(
-		d.Get("project_id").(string),
-		&cfg,
-	)
-	if err != nil {
-		return err
-	}
-	waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
-	d.SetId(resp.BranchResponse.Branch.ID)
-	if err := updateStateBranch(d, resp.BranchResponse.Branch); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func resourceBranchUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "update Branch")
-
-	v, ok := d.GetOk("name")
-	if !ok || v.(string) == "" {
-		return nil
-	}
-
-	if !d.HasChange("name") && !d.HasChange("protected") {
-		return nil
-	}
-
-	var (
-		resp neon.BranchOperations
-		err  error
-	)
-	client := meta.(*neon.Client)
-	if d.HasChange("name") {
-		resp, err = client.UpdateProjectBranch(d.Get("project_id").(string), d.Id(),
-			neon.BranchUpdateRequest{
-				Branch: neon.BranchUpdateRequestBranch{
-					Name: pointer(d.Get("name").(string)),
-				},
-			},
-		)
+	var branch neon.Branch
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		re, err := r.client.CreateProjectBranch(state.ProjectID.ValueString(), cfg)
 		if err != nil {
 			return err
 		}
+		waitUnfinishedOperations(ctx, r.client, re.OperationsResponse.Operations)
+		branch = re.BranchResponse.Branch
+		return nil
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	if d.HasChange("protected") {
-		status := types.GetTristateBool(d, "protected")
-		if status == nil {
-			status = pointer(false)
-		}
-		resp, err = client.UpdateProjectBranch(d.Get("project_id").(string), d.Id(),
-			neon.BranchUpdateRequest{
-				Branch: neon.BranchUpdateRequestBranch{
-					Protected: status,
-				},
-			},
-		)
+	state.inferAttr(branch)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *neonBranchResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var state neonBranchResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var branch neon.Branch
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		branchResp, err := r.client.GetProjectBranch(state.ProjectID.ValueString(), state.ID.ValueString())
+		branch = branchResp.BranchResponse.Branch
+		return err
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+		http.StatusConflict: func(_ context.Context) error {
+			return nil
+		},
+	})...)
+
+	if resp.Diagnostics.HasError() {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	if branch.ID == "" {
+		resp.Diagnostics.AddWarning("branch not found",
+			fmt.Sprintf("branch %q not found in the project %q", state.ID.ValueString(),
+				state.ProjectID.ValueString()))
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	state.inferAttr(branch)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *neonBranchResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var plan neonBranchResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	var state neonBranchResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cfg := neon.BranchUpdateRequest{
+		Branch: neon.BranchUpdateRequestBranch{
+			Protected: plan.Protected.ValueBoolPointer(),
+		},
+	}
+	if !state.Name.Equal(plan.Name) {
+		cfg.Branch.Name = plan.Name.ValueStringPointer()
+	}
+
+	var branch neon.Branch
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		branchResp, err := r.client.UpdateProjectBranch(state.ProjectID.ValueString(), state.ID.ValueString(), cfg)
+		waitUnfinishedOperations(ctx, r.client, branchResp.OperationsResponse.Operations)
+		branch = branchResp.BranchResponse.Branch
+		return err
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+		http.StatusConflict: func(_ context.Context) error {
+			return nil
+		},
+	})...)
+	if resp.Diagnostics.HasError() {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	if branch.ID == "" {
+		resp.Diagnostics.AddWarning("branch not found",
+			fmt.Sprintf("branch %q not found in the project %q", state.ID.ValueString(),
+				state.ProjectID.ValueString()))
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	state.inferAttr(branch)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *neonBranchResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var state neonBranchResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		re, err := r.client.DeleteProjectBranch(state.ProjectID.ValueString(), state.ID.ValueString())
 		if err != nil {
 			return err
 		}
-	}
-	waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
-	return updateStateBranch(d, resp.Branch)
+		waitUnfinishedOperations(ctx, r.client, re.OperationsResponse.Operations)
+		return nil
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+		http.StatusConflict: func(_ context.Context) error {
+			return nil
+		},
+	})...)
+
+	resp.State.RemoveResource(ctx)
 }
 
-func resourceBranchRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "read Branch")
-
-	resp, err := meta.(*neon.Client).GetProjectBranch(d.Get("project_id").(string), d.Id())
-	if err != nil {
-		return err
+func (r *neonBranchResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
 	}
 
-	return updateStateBranch(d, resp.Branch)
-}
-
-func resourceBranchDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "delete Branch")
-
-	client := meta.(*neon.Client)
-	op, err := client.DeleteProjectBranch(d.Get("project_id").(string), d.Id())
-	if err != nil {
-		return err
+	var planned neonBranchResourceModel
+	var config neonBranchResourceModel
+	var state neonBranchResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &planned)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	waitUnfinishedOperations(ctx, client, op.OperationsResponse.Operations)
 
-	d.SetId("")
-	return updateStateBranch(d, neon.Branch{})
+	parentLsnDefined := !config.ParentLsn.IsNull() && !config.ParentLsn.IsUnknown()
+	parentTimestampDefined := !config.ParentTimestamp.IsNull() && !config.ParentTimestamp.IsUnknown()
+	if parentLsnDefined && parentTimestampDefined {
+		resp.Diagnostics.AddError("Invalid Configuration",
+			"parent_lsn and parent_timestamp cannot be set together")
+	}
+
+	if !planned.ParentID.IsNull() && !planned.ParentID.IsUnknown() && !planned.ParentID.Equal(state.ParentID) {
+		resp.RequiresReplace.Append(path.Root("parent_id"))
+		resp.Diagnostics.AddWarning("the resource requires replacement", "parent_id has changed")
+	}
+
+	if !planned.ParentLsn.IsNull() && !planned.ParentLsn.IsUnknown() && !planned.ParentLsn.Equal(state.ParentLsn) {
+		resp.RequiresReplace.Append(path.Root("parent_lsn"))
+		resp.Diagnostics.AddWarning("the resource requires replacement", "parent_lsn has changed")
+	}
+
+	if !planned.ParentTimestamp.IsNull() && !planned.ParentTimestamp.IsUnknown() &&
+		!planned.ParentTimestamp.Equal(state.ParentTimestamp) {
+		resp.RequiresReplace.Append(path.Root("parent_timestamp"))
+		resp.Diagnostics.AddWarning("the resource requires replacement", "parent_timestamp has changed")
+	}
 }
 
-func resourceBranchImport(ctx context.Context, d *schema.ResourceData, meta interface{}) (
-	[]*schema.ResourceData, error,
-) {
-	tflog.Trace(ctx, "import Branch")
-	tflog.Debug(ctx, "split the identifier", map[string]interface{}{"identifier": d.Id()})
-
-	els := strings.SplitN(d.Id(), "/", 2)
+func (r *neonBranchResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	els := strings.SplitN(req.ID, "/", 2)
 	if len(els) != 2 {
-		return nil, fmt.Errorf("invalid identifier, expected {{.ProjectID}}/{{.BranchID}}")
-	}
-	_ = d.Set("project_id", els[0])
-	d.SetId(els[1])
-
-	if !isValidBranchID(d.Id()) {
-		return nil, errors.New("branch ID " + d.Id() + " is not valid")
+		resp.Diagnostics.AddError(
+			"Invalid Terraform State Branch ID",
+			"Expected an import ID in the form <project_id>/<neon_branch_id>.",
+		)
+		return
 	}
 
-	if diags := projectReadiness.Retry(resourceBranchRead, ctx, d, meta); diags.HasError() {
-		d.SetId("")
-		return nil, errors.New(diags[0].Summary)
+	projectID := els[0]
+	branchID := els[1]
+	if !isValidBranchID(branchID) {
+		resp.Diagnostics.AddError("provided Neon Branch ID is not valid", "")
+		return
 	}
-	return []*schema.ResourceData{d}, nil
+
+	var branch neon.Branch
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+		branchResp, err := r.client.GetProjectBranch(projectID, branchID)
+		branch = branchResp.BranchResponse.Branch
+		return err
+	}, ctx)...)
+
+	if resp.Diagnostics.HasError() {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	if branch.ID == "" {
+		resp.Diagnostics.AddWarning("branch not found",
+			fmt.Sprintf("branch %q not found in the project %q", branchID, projectID))
+		return
+	}
+
+	var state neonBranchResourceModel
+	state.inferAttr(branch)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
+
+type validatorNotNegativeInt64 struct{}
+
+func (validatorNotNegativeInt64) ValidateInt64(_ context.Context, req validator.Int64Request,
+	resp *validator.Int64Response) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	if req.ConfigValue.ValueInt64() < 0 {
+		resp.Diagnostics.AddError("invalid value", "value must be a non-negative integer")
+	}
+}
+
+func (validatorNotNegativeInt64) Description(context.Context) string {
+	return "validates that provided int64 is not negative"
+}
+
+func (v validatorNotNegativeInt64) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+var notNegativeInt64 = validatorNotNegativeInt64{}
 
 func isValidBranchID(s string) bool {
 	const prefix = "br-"

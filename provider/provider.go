@@ -43,7 +43,6 @@ var p = &schema.Provider{
 	},
 	ResourcesMap: map[string]*schema.Resource{
 		"neon_project":                  resourceProject(),
-		"neon_branch":                   resourceBranch(),
 		"neon_endpoint":                 resourceEndpoint(),
 		"neon_role":                     resourceRole(),
 		"neon_database":                 resourceDatabase(),
@@ -180,6 +179,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonOrgMemberRoleResource,
 		NewNeonOrgSpendingLimitResource,
 		NewNeonCustomBranchDomainResource,
+		NewNeonBranchResource,
 	}
 }
 

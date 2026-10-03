@@ -216,11 +216,7 @@ func TestAccResourcesImport(t *testing.T) {
 		t.Run("shall successfully import the branch", func(t *testing.T) {
 			resource.UnitTest(
 				t, resource.TestCase{
-					ProviderFactories: map[string]func() (*schema.Provider, error){
-						"neon": func() (*schema.Provider, error) {
-							return newAccTest(), nil
-						},
-					},
+					ProtoV6ProviderFactories: newProviderFactories(),
 					Steps: []resource.TestStep{
 						// WHEN run terraform import
 						{

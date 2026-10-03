@@ -45,22 +45,23 @@ resource "neon_branch" "child" {
 
 ### Required
 
-- `project_id` (String) Project ID.
+- `project_id` (String) The Neon project ID
 
 ### Optional
 
-- `name` (String) Branch name.
-- `parent_id` (String) ID of the branch to check out.
+- `name` (String) The branch name.
+- `parent_id` (String) The ID of the branch to check out.
 - `parent_lsn` (String) Log Sequence Number (LSN) horizon for the data to be present in the new branch.
 See details: https://neon.tech/docs/reference/glossary/#lsn
-- `parent_timestamp` (Number) Timestamp horizon for the data to be present in the new branch.
-**Note**: it's defined as Unix epoch.
-- `protected` (String) Set to 'yes' to activate, 'no' to deactivate explicitly, and omit to keep the default value.
-Set whether the branch is protected.
+**Conflicts with parent_timestamp**.
+- `parent_timestamp` (Number) Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+See details: https://neon.tech/docs/reference/glossary/#lsn
+**Conflicts with parent_lsn**.
+- `protected` (Boolean) Set whether the branch is protected.
 
 ### Read-Only
 
-- `id` (String) Branch ID.
+- `id` (String) The Neon branch ID.
 - `logical_size` (Number) Branch logical size in MB.
 
 
