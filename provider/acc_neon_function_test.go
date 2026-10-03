@@ -19,6 +19,11 @@ func TestFunction(t *testing.T) {
 		t.Skip("TF_ACC must be set to 1")
 	}
 
+	orgID := os.Getenv("ORG_ID")
+	if orgID == "" {
+		t.Skip("ORG_ID must be set")
+	}
+
 	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +32,7 @@ func TestFunction(t *testing.T) {
 	projectNamePrefix := "function"
 
 	t.Cleanup(func() {
-		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, &orgID, nil, nil)
 		for _, project := range resp.Projects {
 			_, _ = client.DeleteProject(project.ID)
 		}
@@ -41,6 +46,7 @@ func TestFunction(t *testing.T) {
 		var newFunctionConfig = func(projectName string, functionName string) string {
 			return fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -52,7 +58,7 @@ resource "neon_function" "this" {
   name          = %q
   zip_file_path = %q
 }
-`, projectName, functionName, zipPath)
+`, projectName, orgID, functionName, zipPath)
 		}
 
 		projectName := newProjectName(projectNamePrefix)
@@ -69,25 +75,18 @@ resource "neon_function" "this" {
 							resource.TestCheckResourceAttr("neon_function.this", "name", "hello"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "id"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "invocation_url"),
-							func(_ *terraform.State) error {
-								// SDK v0.24.0 does not propagate org_id to ListProjectBranches /
-								// GetProject / GetProjectBranchFunction; with a personal API key the
-								// Neon API rejects without it. The resource itself is verified by the
-								// TestCheckResourceAttr checks above; this block is best-effort.
-								pr, err := readProjectInfo(client, projectName)
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+							func(state *terraform.State) error {
+								fn, ok := state.RootModule().Resources["neon_function.this"]
+								if !ok {
+									return fmt.Errorf("neon_function.this not found in state")
 								}
-								br, err := client.ListProjectBranches(pr.ID, nil, nil, nil, nil, nil, nil)
+								rsp, err := client.GetProjectBranchFunction(
+									fn.Primary.Attributes["project_id"],
+									fn.Primary.Attributes["branch_id"],
+									"hello",
+								)
 								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
-								}
-								rsp, err := client.GetProjectBranchFunction(pr.ID, br.Branches[0].ID, "hello")
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+									return err
 								}
 								assert.Equal(t, "hello", rsp.Function.Slug)
 								assert.Equal(t, "hello", rsp.Function.Name)
@@ -99,22 +98,18 @@ resource "neon_function" "this" {
 						Config: newFunctionConfig(projectName, "renamed"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_function.this", "name", "renamed"),
-							func(_ *terraform.State) error {
-								// SDK cross-check is best-effort: see Step 1 closure for why.
-								pr, err := readProjectInfo(client, projectName)
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+							func(state *terraform.State) error {
+								fn, ok := state.RootModule().Resources["neon_function.this"]
+								if !ok {
+									return fmt.Errorf("neon_function.this not found in state")
 								}
-								br, err := client.ListProjectBranches(pr.ID, nil, nil, nil, nil, nil, nil)
+								rsp, err := client.GetProjectBranchFunction(
+									fn.Primary.Attributes["project_id"],
+									fn.Primary.Attributes["branch_id"],
+									"hello",
+								)
 								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
-								}
-								rsp, err := client.GetProjectBranchFunction(pr.ID, br.Branches[0].ID, "hello")
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+									return err
 								}
 								assert.Equal(t, "hello", rsp.Function.Slug)
 								assert.Equal(t, "renamed", rsp.Function.Name)
@@ -137,6 +132,7 @@ resource "neon_function" "this" {
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -147,13 +143,13 @@ resource "neon_function" "this" {
   runtime       = "nodejs24"
   name          = "hello"
   zip_file_path = %q
-  
+
   environment_variables = {
     FOO = 1
     BAR = "baz"
   }
 }
-`, projectName, zipPath),
+`, projectName, orgID, zipPath),
 						Check: func(state *terraform.State) error {
 							fn, ok := state.RootModule().Resources["neon_function.this"]
 							assert.True(t, ok)
@@ -185,6 +181,7 @@ resource "neon_function" "this" {
 		var newFunctionConfig = func(projectName string, slug, functionName string) string {
 			return fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -196,7 +193,7 @@ resource "neon_function" "this" {
   name          = %q
   zip_file_path = %q
 }
-`, projectName, slug, functionName, zipPath)
+`, projectName, orgID, slug, functionName, zipPath)
 		}
 
 		projectName := newProjectName(projectNamePrefix)
@@ -213,26 +210,18 @@ resource "neon_function" "this" {
 							resource.TestCheckResourceAttr("neon_function.this", "name", "bar"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "id"),
 							resource.TestCheckResourceAttrSet("neon_function.this", "invocation_url"),
-							func(_ *terraform.State) error {
-								// SDK v0.24.0 does not propagate org_id to ListProjectBranches /
-								// GetProject / GetProjectBranchFunction; with a personal API key the
-								// Neon API rejects without it. The resource itself is verified by the
-								// TestCheckResourceAttr checks above; this block is best-effort.
-								pr, err := readProjectInfo(client, projectName)
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+							func(state *terraform.State) error {
+								fn, ok := state.RootModule().Resources["neon_function.this"]
+								if !ok {
+									return fmt.Errorf("neon_function.this not found in state")
 								}
-								br, err := client.ListProjectBranches(pr.ID, nil, nil, nil,
-									nil, nil, nil)
+								rsp, err := client.GetProjectBranchFunction(
+									fn.Primary.Attributes["project_id"],
+									fn.Primary.Attributes["branch_id"],
+									"foo",
+								)
 								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
-								}
-								rsp, err := client.GetProjectBranchFunction(pr.ID, br.Branches[0].ID, "foo")
-								if err != nil {
-									t.Logf("warning: sdk cross-check skipped: %v", err)
-									return nil
+									return err
 								}
 								assert.Equal(t, "foo", rsp.Function.Slug)
 								assert.Equal(t, "bar", rsp.Function.Name)

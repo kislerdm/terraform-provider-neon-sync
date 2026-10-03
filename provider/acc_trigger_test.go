@@ -12,9 +12,47 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestTriggerConfigPlan(t *testing.T) {
+	t.Setenv("NEON_API_KEY", "test-api-key")
+
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{
+			name:   "schedule",
+			config: triggerScheduleConfig("test-project", "test-org", "sched", "myfn", "*/5 * * * *"),
+		},
+		{
+			name:   "storage_object_created",
+			config: triggerStorageConfig("test-project", "test-org", "stor", "myfn", "mybucket", "logs/"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config:             tt.config,
+						PlanOnly:           true,
+						ExpectNonEmptyPlan: true,
+					},
+				},
+			})
+		})
+	}
+}
+
 func TestAccNeonTrigger(t *testing.T) {
 	if os.Getenv("TF_ACC") != "1" {
 		t.Skip("TF_ACC must be set to 1")
+	}
+
+	orgID := os.Getenv("ORG_ID")
+	if orgID == "" {
+		t.Skip("ORG_ID must be set")
 	}
 
 	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
@@ -25,7 +63,7 @@ func TestAccNeonTrigger(t *testing.T) {
 	projectNamePrefix := "neonTrigger"
 
 	t.Cleanup(func() {
-		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, &orgID, nil, nil)
 		for _, project := range resp.Projects {
 			_, _ = client.DeleteProject(project.ID)
 		}
@@ -38,14 +76,14 @@ func TestAccNeonTrigger(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: triggerScheduleConfig(projectName, name, "myfn", "*/5 * * * *"),
+					Config: triggerScheduleConfig(projectName, orgID, name, "myfn", "*/5 * * * *"),
 					Check: func(state *terraform.State) error {
 						rs, ok := state.RootModule().Resources["neon_trigger.this"]
 						if !ok {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
 						assert.Equal(t, "schedule", rs.Primary.Attributes["type"])
-						assert.Equal(t, "*/5 * * * *", rs.Primary.Attributes["schedule.cron"])
+						assert.Equal(t, "*/5 * * * *", rs.Primary.Attributes["cron"])
 						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
 						assert.NotEmpty(t, rs.Primary.Attributes["id"])
 						return nil
@@ -61,15 +99,15 @@ func TestAccNeonTrigger(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: triggerStorageConfig(projectName, "stor", "myfn", "mybucket", "logs/"),
+					Config: triggerStorageConfig(projectName, orgID, "stor", "myfn", "mybucket", "logs/"),
 					Check: func(state *terraform.State) error {
 						rs, ok := state.RootModule().Resources["neon_trigger.this"]
 						if !ok {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
 						assert.Equal(t, "storage_object_created", rs.Primary.Attributes["type"])
-						assert.Equal(t, "mybucket", rs.Primary.Attributes["storage_object_created.bucket_name"])
-						assert.Equal(t, "logs/", rs.Primary.Attributes["storage_object_created.prefix"])
+						assert.Equal(t, "mybucket", rs.Primary.Attributes["bucket_name"])
+						assert.Equal(t, "logs/", rs.Primary.Attributes["prefix"])
 						assert.NotEmpty(t, rs.Primary.Attributes["trigger_id"])
 						return nil
 					},
@@ -85,16 +123,16 @@ func TestAccNeonTrigger(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: triggerScheduleConfig(projectName, name, "myfn", "*/5 * * * *"),
+					Config: triggerScheduleConfig(projectName, orgID, name, "myfn", "*/5 * * * *"),
 				},
 				{
-					Config: triggerScheduleConfig(projectName, name, "myfn", "*/10 * * * *"),
+					Config: triggerScheduleConfig(projectName, orgID, name, "myfn", "*/10 * * * *"),
 					Check: func(state *terraform.State) error {
 						rs, ok := state.RootModule().Resources["neon_trigger.this"]
 						if !ok {
 							return fmt.Errorf("neon_trigger.this not found in state")
 						}
-						assert.Equal(t, "*/10 * * * *", rs.Primary.Attributes["schedule.cron"])
+						assert.Equal(t, "*/10 * * * *", rs.Primary.Attributes["cron"])
 						return nil
 					},
 				},
@@ -109,9 +147,7 @@ func TestAccNeonTrigger(t *testing.T) {
   type           = "schedule"
   name           = "imp"
   function_slug  = "myfn"
-  schedule       = {
-    cron = "*/5 * * * *"
-  }
+  cron           = "*/5 * * * *"
 }`
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: newProviderFactories(),
@@ -130,9 +166,10 @@ func TestAccNeonTrigger(t *testing.T) {
 	})
 }
 
-func triggerScheduleConfig(projectName, triggerName, fnSlug, cron string) string {
+func triggerScheduleConfig(projectName, orgID, triggerName, fnSlug, cron string) string {
 	return fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -142,16 +179,15 @@ resource "neon_trigger" "this" {
   name           = %q
   type           = "schedule"
   function_slug  = %q
-  schedule = {
-    cron = %q
-  }
+  cron           = %q
 }
-`, projectName, triggerName, fnSlug, cron)
+`, projectName, orgID, triggerName, fnSlug, cron)
 }
 
-func triggerStorageConfig(projectName, triggerName, fnSlug, bucket, prefix string) string {
+func triggerStorageConfig(projectName, orgID, triggerName, fnSlug, bucket, prefix string) string {
 	return fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -167,11 +203,9 @@ resource "neon_trigger" "this" {
   name           = %q
   type           = "storage_object_created"
   function_slug  = %q
-  storage_object_created = {
-    bucket_name = neon_bucket.this.name
-    prefix      = %q
-  }
+  bucket_name    = neon_bucket.this.name
+  prefix         = %q
   depends_on = [neon_bucket.this]
 }
-`, projectName, bucket, triggerName, fnSlug, prefix)
+`, projectName, orgID, bucket, triggerName, fnSlug, prefix)
 }

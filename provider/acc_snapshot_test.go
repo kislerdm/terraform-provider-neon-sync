@@ -34,13 +34,18 @@ func TestAccNeonSnapshot(t *testing.T) {
 		t.Skip("TF_ACC must be set to 1")
 	}
 
+	orgID := os.Getenv("ORG_ID")
+	if orgID == "" {
+		t.Skip("ORG_ID must be set")
+	}
+
 	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
 	require.NoError(t, err)
 
 	projectNamePrefix := "neonSnapshotAcc"
 
 	t.Cleanup(func() {
-		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, &orgID, nil, nil)
 		for _, project := range resp.Projects {
 			_, _ = client.DeleteProject(project.ID)
 		}
@@ -52,7 +57,7 @@ func TestAccNeonSnapshot(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: newSnapshotConfig(projectName, "tf-acc-snap", ""),
+					Config: newSnapshotConfig(projectName, orgID, "tf-acc-snap", ""),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttrSet("neon_snapshot.this", "id"),
 						resource.TestCheckResourceAttr("neon_snapshot.this", "name", "tf-acc-snap"),
@@ -72,10 +77,10 @@ func TestAccNeonSnapshot(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: newSnapshotConfig(projectName, "tf-acc-snap", ""),
+					Config: newSnapshotConfig(projectName, orgID, "tf-acc-snap", ""),
 				},
 				{
-					Config: newSnapshotConfig(projectName, "tf-acc-snap-renamed", ""),
+					Config: newSnapshotConfig(projectName, orgID, "tf-acc-snap-renamed", ""),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttr("neon_snapshot.this", "name", "tf-acc-snap-renamed"),
 						verifySnapshotAgainstAPI(t, client, "tf-acc-snap-renamed"),
@@ -92,14 +97,14 @@ func TestAccNeonSnapshot(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: newSnapshotConfig(projectName, "expiry", expiry),
+					Config: newSnapshotConfig(projectName, orgID, "expiry", expiry),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttr("neon_snapshot.this", "expires_at", expiry),
 						verifySnapshotExpiryAgainstAPI(t, client, expiry),
 					),
 				},
 				{
-					Config: newSnapshotConfig(projectName, "expiry", ""),
+					Config: newSnapshotConfig(projectName, orgID, "expiry", ""),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttr("neon_snapshot.this", "name", "expiry"),
 						verifySnapshotExpiryIsClear(t, client),
@@ -115,7 +120,7 @@ func TestAccNeonSnapshot(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: newSnapshotConfig(projectName, "tf-acc-import", ""),
+					Config: newSnapshotConfig(projectName, orgID, "tf-acc-import", ""),
 					Check: resource.ComposeTestCheckFunc(
 						captureSnapshotIDFromState(t, client),
 					),
@@ -139,14 +144,14 @@ func TestAccNeonSnapshot(t *testing.T) {
 			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
-					Config: newSnapshotConfig(projectName, "to-delete", ""),
+					Config: newSnapshotConfig(projectName, orgID, "to-delete", ""),
 					Check: resource.ComposeTestCheckFunc(
 						recordSnapshotForOutOfBandDelete(t, client, "to-delete"),
 					),
 				},
 				{
 					PreConfig: deleteSnapshotOutOfBand(t, client),
-					Config:    newSnapshotConfig(projectName, "to-delete", ""),
+					Config:    newSnapshotConfig(projectName, orgID, "to-delete", ""),
 					Check: resource.ComposeTestCheckFunc(
 						assertSnapshotRemovedFromStateAndAPI(t, client, "to-delete"),
 					),
@@ -156,16 +161,14 @@ func TestAccNeonSnapshot(t *testing.T) {
 	})
 }
 
-// newSnapshotConfig is the file-scope helper that emits the HCL for a
-// snapshot resource. Only the snapshot name and optional expiry vary
-// between test steps; project name, region, and dependency are constants.
-func newSnapshotConfig(projectName, snapshotName, expiresAt string) string {
+func newSnapshotConfig(projectName, orgID, snapshotName, expiresAt string) string {
 	expiryBlock := ""
 	if expiresAt != "" {
 		expiryBlock = fmt.Sprintf("  expires_at = %q\n", expiresAt)
 	}
 	return fmt.Sprintf(`resource "neon_project" "this" {
   name      = %q
+  org_id    = %q
   region_id = "aws-us-east-2"
 }
 
@@ -175,7 +178,7 @@ resource "neon_snapshot" "this" {
   name       = %q
 %s  depends_on = [neon_project.this]
 }
-`, projectName, snapshotName, expiryBlock)
+`, projectName, orgID, snapshotName, expiryBlock)
 }
 
 // verifySnapshotAgainstAPI asserts that the snapshot stored in Terraform
