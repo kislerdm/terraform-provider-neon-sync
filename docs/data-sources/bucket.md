@@ -1,31 +1,31 @@
 ---
-page_title: "neon_bucket_connection Data Source - terraform-provider-neon"
+page_title: "neon_bucket Data Source - terraform-provider-neon"
 description: |-
   Reads the S3-compatible connection details for buckets on a Neon branch.
 ---
 
-# neon_bucket_connection (Data Source)
+# neon_bucket (Data Source)
 
 Reads the S3-compatible connection details for buckets on a Neon branch.
 
 ## Example Usage
 
 ```terraform
-data "neon_bucket_connection" "this" {
+data "neon_bucket" "this" {
   project_id = "cool-moon-42"
   branch_id  = "br-cool-moon-42"
 }
 
 output "s3_endpoint" {
-  value = data.neon_bucket_connection.this.s3_endpoint
+  value = data.neon_bucket.this.s3_endpoint
 }
 
 output "region" {
-  value = data.neon_bucket_connection.this.region
+  value = data.neon_bucket.this.region
 }
 
 output "force_path_style" {
-  value = data.neon_bucket_connection.this.force_path_style
+  value = data.neon_bucket.this.force_path_style
 }
 ```
 

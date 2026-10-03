@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBucketConnectionDataSourceRegisteredWithFrameworkProvider(t *testing.T) {
+func TestBucketDataSourceRegisteredWithFrameworkProvider(t *testing.T) {
 	p := &frameworkProvider{}
 	dataSources := p.DataSources(context.Background())
 
@@ -27,17 +27,18 @@ func TestBucketConnectionDataSourceRegisteredWithFrameworkProvider(t *testing.T)
 		var metadata datasource.MetadataResponse
 		candidate.Metadata(context.Background(), datasource.MetadataRequest{}, &metadata)
 		typeNames = append(typeNames, metadata.TypeName)
-		if metadata.TypeName == "neon_bucket_connection" {
+		if metadata.TypeName == "neon_bucket" {
 			found = candidate
 		}
 	}
 
-	require.NotNil(t, found, "neon_bucket_connection must be registered as a Framework data source")
+	require.NotNil(t, found, "neon_bucket must be registered as a Framework data source")
 	require.NotContains(t, typeNames, "neon_branch_storage", "the old data source name must not remain as an alias")
+	require.NotContains(t, typeNames, "neon_bucket_connection", "the old data source name must not remain as an alias")
 }
 
-func TestBucketConnectionDataSourceSchema(t *testing.T) {
-	d := NewBucketConnectionDataSource()
+func TestBucketDataSourceSchema(t *testing.T) {
+	d := NewBucketDataSource()
 	var response datasource.SchemaResponse
 	d.Schema(context.Background(), datasource.SchemaRequest{}, &response)
 
@@ -82,10 +83,10 @@ func newBranchDataSourceTestClient(t *testing.T, path string, status int, body s
 	return client
 }
 
-func newBucketConnectionDataSourceWithStub(t *testing.T, status int, body string) *neonBucketConnectionDataSource {
+func newBucketDataSourceWithStub(t *testing.T, status int, body string) *neonBucketDataSource {
 	t.Helper()
 	client := newBranchDataSourceTestClient(t, "/api/v2/projects/cool-moon-42/branches/br-cool-moon-42/storage", status, body)
-	d := NewBucketConnectionDataSource().(*neonBucketConnectionDataSource)
+	d := NewBucketDataSource().(*neonBucketDataSource)
 	var resp datasource.ConfigureResponse
 	d.Configure(context.Background(), datasource.ConfigureRequest{ProviderData: &providerAdapter{sdk: client}}, &resp)
 	require.False(t, resp.Diagnostics.HasError(), "%v", resp.Diagnostics)
@@ -94,7 +95,7 @@ func newBucketConnectionDataSourceWithStub(t *testing.T, status int, body string
 
 func bucketConnectionTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	d := NewBucketConnectionDataSource()
+	d := NewBucketDataSource()
 	var resp datasource.SchemaResponse
 	d.Schema(context.Background(), datasource.SchemaRequest{}, &resp)
 	require.Zero(t, resp.Diagnostics.ErrorsCount())
@@ -118,8 +119,8 @@ func bucketConnectionReadConfig(t *testing.T, projectID, branchID string) tfsdk.
 	}
 }
 
-func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
-	d := newBucketConnectionDataSourceWithStub(t, http.StatusOK, `{
+func TestBucketDataSourceReadSuccess(t *testing.T) {
+	d := newBucketDataSourceWithStub(t, http.StatusOK, `{
 		"enabled": true,
 		"force_path_style": true,
 		"region": "us-east-2",
@@ -133,7 +134,7 @@ func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
 		resp)
 
 	require.Equal(t, 0, resp.Diagnostics.ErrorsCount(), "diagnostics: %v", resp.Diagnostics)
-	var got neonBucketConnectionDataSourceModel
+	var got neonBucketDataSourceModel
 	stateDiags := resp.State.Get(context.Background(), &got)
 	require.Equal(t, 0, len(stateDiags), "state diagnostics: %v", stateDiags)
 
@@ -145,8 +146,8 @@ func TestBucketConnectionDataSourceReadSuccess(t *testing.T) {
 	require.True(t, got.ForcePathStyle.ValueBool())
 }
 
-func TestBucketConnectionDataSourceReadNotFound(t *testing.T) {
-	d := newBucketConnectionDataSourceWithStub(t, http.StatusNotFound, `{
+func TestBucketDataSourceReadNotFound(t *testing.T) {
+	d := newBucketDataSourceWithStub(t, http.StatusNotFound, `{
 		"code": "STORAGE_NOT_ENABLED",
 		"message": "not found"
 	}`)
@@ -162,8 +163,8 @@ func TestBucketConnectionDataSourceReadNotFound(t *testing.T) {
 	require.Equal(t, "[HTTP Code: 404][Error Code: STORAGE_NOT_ENABLED] not found", resp.Diagnostics[0].Detail())
 }
 
-func TestBucketConnectionDataSourceReadAPIError(t *testing.T) {
-	d := newBucketConnectionDataSourceWithStub(t, http.StatusBadRequest, `{
+func TestBucketDataSourceReadAPIError(t *testing.T) {
+	d := newBucketDataSourceWithStub(t, http.StatusBadRequest, `{
 		"code": "INVALID_INPUT",
 		"message": "upstream rejected request"
 	}`)
@@ -183,8 +184,8 @@ func TestBucketConnectionDataSourceReadAPIError(t *testing.T) {
 	require.Equal(t, "[HTTP Code: 400][Error Code: INVALID_INPUT] upstream rejected request", resp.Diagnostics[0].Detail())
 }
 
-func TestBucketConnectionDataSourceReadWithoutConfigure(t *testing.T) {
-	d := &neonBucketConnectionDataSource{}
+func TestBucketDataSourceReadWithoutConfigure(t *testing.T) {
+	d := &neonBucketDataSource{}
 	resp := &datasource.ReadResponse{State: tfsdk.State{Schema: bucketConnectionTestSchema(t)}}
 
 	d.Read(context.Background(),
@@ -196,7 +197,7 @@ func TestBucketConnectionDataSourceReadWithoutConfigure(t *testing.T) {
 	require.Equal(t, "The Neon provider client is unavailable.", resp.Diagnostics[0].Detail())
 }
 
-func TestBucketConnectionDataSourceConfigureWithConfiguredProvider(t *testing.T) {
+func TestBucketDataSourceConfigureWithConfiguredProvider(t *testing.T) {
 	ctx := context.Background()
 	p := &frameworkProvider{version: "test"}
 	var schemaResp frameworkprovider.SchemaResponse
@@ -217,7 +218,7 @@ func TestBucketConnectionDataSourceConfigureWithConfiguredProvider(t *testing.T)
 	require.True(t, ok, "provider must supply DataSourceData")
 	require.NotNil(t, adapter.sdk)
 
-	d := NewBucketConnectionDataSource().(*neonBucketConnectionDataSource)
+	d := NewBucketDataSource().(*neonBucketDataSource)
 	var dataSourceConfigureResp datasource.ConfigureResponse
 	d.Configure(ctx, datasource.ConfigureRequest{ProviderData: configureResp.DataSourceData}, &dataSourceConfigureResp)
 	require.False(t, dataSourceConfigureResp.Diagnostics.HasError(), "%v", dataSourceConfigureResp.Diagnostics)

@@ -9,14 +9,14 @@ import (
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-var _ datasource.DataSource = (*neonBucketConnectionDataSource)(nil)
-var _ datasource.DataSourceWithConfigure = (*neonBucketConnectionDataSource)(nil)
+var _ datasource.DataSource = (*neonBucketDataSource)(nil)
+var _ datasource.DataSourceWithConfigure = (*neonBucketDataSource)(nil)
 
-type neonBucketConnectionDataSource struct {
+type neonBucketDataSource struct {
 	client *neon.Client
 }
 
-type neonBucketConnectionDataSourceModel struct {
+type neonBucketDataSourceModel struct {
 	ID             types.String `tfsdk:"id"`
 	ProjectID      types.String `tfsdk:"project_id"`
 	BranchID       types.String `tfsdk:"branch_id"`
@@ -25,15 +25,15 @@ type neonBucketConnectionDataSourceModel struct {
 	ForcePathStyle types.Bool   `tfsdk:"force_path_style"`
 }
 
-func NewBucketConnectionDataSource() datasource.DataSource {
-	return &neonBucketConnectionDataSource{}
+func NewBucketDataSource() datasource.DataSource {
+	return &neonBucketDataSource{}
 }
 
-func (d *neonBucketConnectionDataSource) Metadata(_ context.Context, _ datasource.MetadataRequest, resp *datasource.MetadataResponse) {
-	resp.TypeName = "neon_bucket_connection"
+func (d *neonBucketDataSource) Metadata(_ context.Context, _ datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = "neon_bucket"
 }
 
-func (d *neonBucketConnectionDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *neonBucketDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Reads the S3-compatible connection details for buckets on a Neon branch.",
 		Attributes: map[string]schema.Attribute{
@@ -65,7 +65,7 @@ func (d *neonBucketConnectionDataSource) Schema(_ context.Context, _ datasource.
 	}
 }
 
-func (d *neonBucketConnectionDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *neonBucketDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -84,8 +84,8 @@ func (d *neonBucketConnectionDataSource) Configure(_ context.Context, req dataso
 	d.client = client.sdk
 }
 
-func (d *neonBucketConnectionDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var data neonBucketConnectionDataSourceModel
+func (d *neonBucketDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var data neonBucketDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
