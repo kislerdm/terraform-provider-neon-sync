@@ -20,9 +20,9 @@ func TestAccNeonOrgSpendingLimit(t *testing.T) {
 		t.Skip("TF_ACC must be set to 1")
 	}
 
-	orgID := os.Getenv("NEON_ACC_ORG_ID")
+	orgID := os.Getenv("ORG_ID")
 	if orgID == "" {
-		t.Skip("NEON_ACC_ORG_ID must be set")
+		t.Skip("ORG_ID must be set")
 	}
 
 	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
