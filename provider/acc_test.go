@@ -125,7 +125,7 @@ resource "neon_endpoint" "this" {
 resource "neon_role" "this" {
 	project_id = neon_project.this.id
 	branch_id  = neon_project.this.default_branch_id
-	name 	   = "%s"
+	name 	   = %q
 }
 
 resource "neon_database" "this" {
@@ -684,11 +684,7 @@ func fetchDataSources(t *testing.T) {
 			branchRoleName := "role-foo"
 
 			resource.Test(t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`
@@ -844,11 +840,7 @@ resource "neon_database" "this" {
 
 	resource.Test(
 		t, resource.TestCase{
-			ProviderFactories: map[string]func() (*schema.Provider, error){
-				"neon": func() (*schema.Provider, error) {
-					return newAccTest(), nil
-				},
-			},
+			ProtoV6ProviderFactories: newProviderFactories(),
 			Steps: []resource.TestStep{
 				{
 					ResourceName: "initial provisioning",
@@ -927,11 +919,7 @@ func testPlanAfterRoleImport(t *testing.T, client *neon.Client) {
 }`, roleID.Name, roleID.ProjectID, roleID.BranchID)
 
 	resource.Test(t, resource.TestCase{
-		ProviderFactories: map[string]func() (*schema.Provider, error){
-			"neon": func() (*schema.Provider, error) {
-				return newAccTest(), nil
-			},
-		},
+		ProtoV6ProviderFactories: newProviderFactories(),
 		Steps: []resource.TestStep{
 			{
 				ResourceName:  "neon_role.this",

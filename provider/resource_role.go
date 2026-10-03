@@ -2,201 +2,259 @@ package provider
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
-	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	schemaTFSDK "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	typesTFSDK "github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-func resourceRole() *schema.Resource {
-	return &schema.Resource{
+var _ resource.ResourceWithConfigure = (*neonRole)(nil)
+var _ resource.ResourceWithImportState = (*neonRole)(nil)
+
+type neonRole struct {
+	client *neon.Client
+}
+
+type neonRoleResourceModel struct {
+	ID        typesTFSDK.String `tfsdk:"id"`
+	ProjectID typesTFSDK.String `tfsdk:"project_id"`
+	BranchID  typesTFSDK.String `tfsdk:"branch_id"`
+	Name      typesTFSDK.String `tfsdk:"name"`
+	// TODO: remove after the release with the ephemeral resource neon_role
+	Password  typesTFSDK.String `tfsdk:"password"`
+	Protected typesTFSDK.Bool   `tfsdk:"protected"`
+	// 	TODO: add no_login support
+}
+
+func (m *neonRoleResourceModel) inferAttr(role neon.Role) {
+	m.ID = typesTFSDK.StringValue(m.ProjectID.ValueString() + "/" + role.BranchID + "/" + role.Name)
+	m.BranchID = typesTFSDK.StringValue(role.BranchID)
+	m.Name = typesTFSDK.StringValue(role.Name)
+	m.Password = typesTFSDK.StringPointerValue(role.Password)
+	m.Protected = typesTFSDK.BoolPointerValue(role.Protected)
+}
+
+func NewNeonRoleResource() resource.Resource {
+	return &neonRole{}
+}
+
+func (r *neonRole) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*providerAdapter)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type",
+			"Expected *providerAdapter, got an unexpected type.")
+		return
+	}
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
+	}
+	r.client = client.sdk
+}
+
+func (r neonRole) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "neon_role"
+}
+
+func (r neonRole) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+
+	resp.Schema = schemaTFSDK.Schema{
 		Description: `Project Role. **Note** that User and Role are synonymous terms in Neon. 
 See details: https://neon.tech/docs/manage/users/
 `,
-		SchemaVersion: 7,
-		Importer: &schema.ResourceImporter{
-			StateContext: resourceRoleImport,
-		},
-		CreateContext: resourceRoleCreateRetry,
-		ReadContext:   resourceRoleReadRetry,
-		DeleteContext: resourceRoleDeleteRetry,
-		Schema: map[string]*schema.Schema{
-			"project_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Project ID.",
-			},
-			"branch_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Branch ID.",
-			},
-			"name": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Role name.",
-			},
-			"password": {
-				Type:        schema.TypeString,
+		Attributes: map[string]schemaTFSDK.Attribute{
+			"id": schemaTFSDK.StringAttribute{
 				Computed:    true,
-				Sensitive:   true,
-				Description: "Database authentication password.",
+				Description: "The role ID.",
 			},
-			"protected": {
-				Type:     schema.TypeBool,
-				Computed: true,
+			"project_id": schemaTFSDK.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "Project ID.",
 			},
-		},
-	}
-}
-
-func updateStateRole(d *schema.ResourceData, v neon.Role) error {
-	if err := d.Set("name", v.Name); err != nil {
-		return err
-	}
-	if v.Password != nil {
-		if err := d.Set("password", *v.Password); err != nil {
-			return err
-		}
-	}
-	if err := d.Set("protected", v.Protected); err != nil {
-		return err
-	}
-	return nil
-}
-
-func resourceRoleCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceRoleCreate, ctx, d, meta)
-}
-
-func resourceRoleCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "created Role")
-
-	r := complexID{
-		ProjectID: d.Get("project_id").(string),
-		BranchID:  d.Get("branch_id").(string),
-		Name:      d.Get("name").(string),
-	}
-	client := meta.(*neon.Client)
-	resp, err := client.CreateProjectBranchRole(
-		r.ProjectID, r.BranchID, neon.RoleCreateRequest{
-			Role: neon.RoleCreateRequestRole{
-				Name: r.Name,
+			"branch_id": schemaTFSDK.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "Branch ID.",
+			},
+			"name": schemaTFSDK.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "Role name.",
+			},
+			"password": schemaTFSDK.StringAttribute{
+				Computed:           true,
+				Sensitive:          true,
+				DeprecationMessage: "Use the Ephemeral resources `neon_role` instead.",
+				Description:        "Database authentication password.",
+			},
+			"protected": schemaTFSDK.BoolAttribute{
+				Computed:    true,
+				Description: "Indicates if the role is protected.",
 			},
 		},
-	)
-	if err != nil {
-		return err
 	}
-	waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+}
 
-	d.SetId(r.toString())
+func (r neonRole) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
 
-	role := resp.Role
-	if role.Password == nil {
-		r, err := client.GetProjectBranchRolePassword(r.ProjectID, r.BranchID, role.Name)
+	var state neonRoleResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	cfg := neon.RoleCreateRequest{
+		Role: neon.RoleCreateRequestRole{
+			Name: state.Name.ValueString(),
+		},
+	}
+
+	var role neon.Role
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		re, err := r.client.CreateProjectBranchRole(state.ProjectID.ValueString(), state.BranchID.ValueString(), cfg)
 		if err != nil {
 			return err
 		}
-		role.Password = pointer(r.Password)
+		waitUnfinishedOperations(ctx, r.client, re.OperationsResponse.Operations)
+		role = re.RoleResponse.Role
+		return nil
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	return updateStateRole(d, role)
+	state.inferAttr(role)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceRoleReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceRoleRead, ctx, d, meta, map[int]FallbackFn{
-		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			tflog.Debug(ctx, "role not found, removing from state",
-				map[string]interface{}{
-					"name":       d.Get("name"),
-					"project_id": d.Get("project_id"),
-					"branch_id":  d.Get("branch_id"),
-				})
-			d.SetId("")
-			return nil
-		}})
-}
+func (r neonRole) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
 
-func resourceRoleRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "read Role")
+	var state neonRoleResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	projectID, _ := d.Get("project_id").(string)
-	branchID, _ := d.Get("branch_id").(string)
-	name, _ := d.Get("name").(string)
-
-	resp, err := meta.(*neon.Client).GetProjectBranchRole(projectID, branchID, name)
-	if err != nil {
+	var role neon.Role
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		roleResp, err := r.client.GetProjectBranchRole(state.ProjectID.ValueString(), state.BranchID.ValueString(),
+			state.Name.ValueString())
+		role = roleResp.Role
 		return err
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+		http.StatusConflict: func(_ context.Context) error {
+			return nil
+		},
+	})...)
+
+	if resp.Diagnostics.HasError() {
+		resp.State.RemoveResource(ctx)
+		return
 	}
 
-	role := resp.Role
-	if role.Password == nil {
-		r, err := meta.(*neon.Client).GetProjectBranchRolePassword(projectID, branchID, name)
+	if role.BranchID == "" {
+		resp.Diagnostics.AddWarning("role not found",
+			fmt.Sprintf("role %q not found in the project/branch \"%s/%s\"", state.Name.ValueString(),
+				state.ProjectID.ValueString(), state.BranchID.ValueString()))
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	state.inferAttr(role)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r neonRole) Update(_ context.Context, _ resource.UpdateRequest, _ *resource.UpdateResponse) {}
+
+func (r neonRole) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var state neonRoleResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		re, err := r.client.DeleteProjectBranchRole(state.ProjectID.ValueString(), state.BranchID.ValueString(),
+			state.Name.ValueString())
 		if err != nil {
 			return err
 		}
-		role.Password = pointer(r.Password)
-	}
-
-	return updateStateRole(d, role)
-}
-
-func resourceRoleDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceRoleDelete, ctx, d, meta, map[int]FallbackFn{
-		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
+		waitUnfinishedOperations(ctx, r.client, re.OperationsResponse.Operations)
+		return nil
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+		http.StatusConflict: func(_ context.Context) error {
 			return nil
 		},
-		http.StatusUnprocessableEntity: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
-			return nil
-		},
-	})
+	})...)
+
+	resp.State.RemoveResource(ctx)
 }
 
-func resourceRoleDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-	tflog.Trace(ctx, "delete Role")
-	client := meta.(*neon.Client)
-	op, err := client.DeleteProjectBranchRole(
-		d.Get("project_id").(string),
-		d.Get("branch_id").(string),
-		d.Get("name").(string),
-	)
-	if err != nil {
-		return err
-	}
-	waitUnfinishedOperations(ctx, client, op.OperationsResponse.Operations)
-	d.SetId("")
-	if err := d.Set("project_id", ""); err != nil {
-		return err
-	}
-	if err := d.Set("branch_id", ""); err != nil {
-		return err
-	}
-	return updateStateRole(d, neon.Role{})
-}
-
-func resourceRoleImport(ctx context.Context, d *schema.ResourceData, meta interface{}) (
-	[]*schema.ResourceData, error,
-) {
-	tflog.Trace(ctx, "import Role")
-
-	r, err := parseComplexID(d.Id())
-	if err != nil {
-		return nil, err
+func (r neonRole) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	els := strings.SplitN(req.ID, "/", 3)
+	if len(els) != 3 {
+		resp.Diagnostics.AddError(
+			"Invalid Terraform State Role ID",
+			"Expected an import ID in the form <project_id>/<neon_branch_id>/<role_name>.",
+		)
+		return
 	}
 
-	setResourceAttrsFromComplexID(d, r)
-	if diags := projectReadiness.Retry(resourceRoleRead, ctx, d, meta); diags.HasError() {
-		d.SetId("")
-		return nil, errors.New(diags[0].Summary)
+	projectID := els[0]
+	branchID := els[1]
+	roleName := els[2]
+	if !isValidBranchID(branchID) {
+		resp.Diagnostics.AddError("provided Neon Branch ID is not valid", "")
+		return
 	}
-	return []*schema.ResourceData{d}, nil
+
+	var role neon.Role
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+		roleResp, err := r.client.GetProjectBranchRole(projectID, branchID, roleName)
+		role = roleResp.Role
+		return err
+	}, ctx)...)
+
+	if resp.Diagnostics.HasError() {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	if role.BranchID == "" {
+		resp.Diagnostics.AddWarning("role not found",
+			fmt.Sprintf("role %q not found in the project/branch \"%s/%s\"", roleName, projectID, branchID))
+		return
+	}
+
+	var state neonRoleResourceModel
+	state.ProjectID = typesTFSDK.StringValue(projectID)
+	state.inferAttr(role)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
