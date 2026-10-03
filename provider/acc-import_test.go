@@ -164,20 +164,16 @@ func TestAccResourcesImport(t *testing.T) {
 
 		resource.UnitTest(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					// WHEN run terraform import
 					{
 						ResourceName: "neon_database.this",
 						Config: fmt.Sprintf(`resource "neon_database" "this" {
-  name       = "%s"
-  project_id = "%s"
-  branch_id  = "%s"
-  owner_name = "%s"
+  name       = %q
+  project_id = %q
+  branch_id  = %q
+  owner_name = %q
 }`, customDatabaseName, projectID, defaultBranchID, defaultRoleName),
 						ImportState:   true,
 						ImportStateId: customDatabaseID.toString(),

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
@@ -26,7 +25,7 @@ func TestRecreateDatabaseIfNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	projectNamePrefix := "databaseRecreation-"
+	projectNamePrefix := "database"
 
 	t.Cleanup(func() {
 		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
@@ -63,6 +62,80 @@ func TestRecreateDatabaseIfNotFound(t *testing.T) {
 		return dbID
 	}
 
+	t.Run(`shall create the project with a custom role and database with owner default project role, 
+then update the database name, then update the database owner_name`, func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		var config = func(dbName string, customRole bool) string {
+			ownerName := "neon_project.this.database_user"
+			if customRole {
+				ownerName = "neon_role.this.name"
+			}
+			return fmt.Sprintf(`resource "neon_project" "this" {name = %q}
+
+resource "neon_role" "this" {
+	name       = "r-custom"
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+}
+
+resource "neon_database" "this" {
+	name       = %q
+	project_id = neon_project.this.id
+	branch_id  = neon_project.this.default_branch_id
+	owner_name = %s
+}
+`, projectName, dbName, ownerName)
+		}
+
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: config("db-foo", false),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("neon_database.this", "name", "db-foo"),
+						func(state *terraform.State) error {
+							resources := state.RootModule().Resources
+							assert.Equal(t,
+								resources["neon_project.this"].Primary.Attributes["database_user"],
+								resources["neon_database.this"].Primary.Attributes["owner_name"],
+							)
+							return nil
+						},
+					),
+				},
+				{
+					Config: config("db-bar", false),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("neon_database.this", "name", "db-bar"),
+						func(state *terraform.State) error {
+							resources := state.RootModule().Resources
+							assert.Equal(t,
+								resources["neon_project.this"].Primary.Attributes["database_user"],
+								resources["neon_database.this"].Primary.Attributes["owner_name"],
+							)
+							return nil
+						},
+					),
+				},
+				{
+					Config: config("db-bar", true),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("neon_database.this", "name", "db-bar"),
+						func(state *terraform.State) error {
+							resources := state.RootModule().Resources
+							assert.Equal(t,
+								resources["neon_role.this"].Primary.Attributes["name"],
+								resources["neon_database.this"].Primary.Attributes["owner_name"],
+							)
+							return nil
+						},
+					),
+				},
+			},
+		})
+	})
+
 	t.Run("shall yield non empty refresh plan if the database was deleted outside of terraform",
 		func(t *testing.T) {
 			projectName := newProjectName(projectNamePrefix)
@@ -75,11 +148,7 @@ resource "neon_database" "this" {
 }`, projectName)
 			resource.Test(
 				t, resource.TestCase{
-					ProviderFactories: map[string]func() (*schema.Provider, error){
-						"neon": func() (*schema.Provider, error) {
-							return newAccTest(), nil
-						},
-					},
+					ProtoV6ProviderFactories: newProviderFactories(),
 					Steps: []resource.TestStep{
 						{
 							Config: config,
@@ -138,11 +207,7 @@ resource "neon_database" "this" {
 }`, projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: config,
@@ -163,11 +228,7 @@ resource "neon_database" "this" {
 		var refDatabaseID int64
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
@@ -244,11 +305,7 @@ resource "neon_database" "this" {
 }`, projectName)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: config,
