@@ -35,8 +35,19 @@ resource "neon_org_spending_limit" "this" {
 
 ## Import
 
-Import an organization spending limit using the organization ID.
+Import using the [import block](https://developer.hashicorp.com/terraform/language/import):
 
-```shell
-terraform import neon_org_spending_limit.this <org_id>
+For example:
+
+```hcl
+import {
+  to = neon_org_spending_limit.this
+  id = "org-foo-bar-123"
+}
+```
+
+Import using the command `terraform import`:
+
+```commandline
+terraform import neon_org_spending_limit.this "org-foo-bar-123"
 ```
