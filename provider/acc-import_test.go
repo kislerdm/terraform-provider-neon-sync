@@ -295,17 +295,13 @@ func TestAccResourcesImport(t *testing.T) {
 		grantID := fmt.Sprintf("%s/%s", projectID, respGrant.ID)
 		resource.UnitTest(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						ResourceName: "neon_project_permission.this",
 						Config: fmt.Sprintf(`resource "neon_project_permission" "this" {
-	project_id = "%s"
-	grantee    = "%s"
+	project_id = %q
+	grantee    = %q
 }`, projectID, granteeEmail),
 						// WHEN run terraform import
 						ImportState:   true,

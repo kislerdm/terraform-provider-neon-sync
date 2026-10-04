@@ -2,49 +2,86 @@ package provider
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-func resourceVPCEndpointAssignment() *schema.Resource {
-	return &schema.Resource{
+var _ resource.ResourceWithConfigure = (*neonVPCEndpointAssignment)(nil)
+var _ resource.ResourceWithImportState = (*neonVPCEndpointAssignment)(nil)
+
+type neonVPCEndpointAssignment struct {
+	client *neon.Client
+}
+
+type neonVPCEndpointAssignmentResourceModel struct {
+	ID            types.String `tfsdk:"id"`
+	OrgID         types.String `tfsdk:"org_id"`
+	RegionID      types.String `tfsdk:"region_id"`
+	VPCEndpointID types.String `tfsdk:"vpc_endpoint_id"`
+	Label         types.String `tfsdk:"label"`
+}
+
+func NewNeonVPCEndpointAssignmentResource() resource.Resource {
+	return &neonVPCEndpointAssignment{}
+}
+
+func (r *neonVPCEndpointAssignment) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	client, ok := req.ProviderData.(*providerAdapter)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type",
+			"Expected *providerAdapter, got an unexpected type.")
+		return
+	}
+	if client.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "")
+		return
+	}
+	r.client = client.sdk
+}
+
+func (r neonVPCEndpointAssignment) Metadata(_ context.Context, _ resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = "neon_vpc_endpoint_assignment"
+}
+
+func (r neonVPCEndpointAssignment) Schema(_ context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+
+	resp.Schema = schema.Schema{
 		Description: `Assigns, or updates existing assignment of a VPC endpoint to a Neon organization.
 See details: https://neon.tech/docs/guides/neon-private-networking#enable-private-dns
 `,
-		Importer: &schema.ResourceImporter{
-			StateContext: resourceVPCEndpointAssignmentImport,
-		},
-		CreateContext: resourceVPCEndpointAssignmentCreateRetry,
-		UpdateContext: resourceVPCEndpointAssignmentCreateRetry,
-		ReadContext:   resourceVPCEndpointAssignmentReadRetry,
-		DeleteContext: resourceVPCEndpointAssignmentDeleteRetry,
-		Schema: map[string]*schema.Schema{
-			"org_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The Neon organization ID.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The ID of this resource.",
 			},
-			"region_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The Neon region ID.",
+			"org_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The Neon organization ID.",
 			},
-			"vpc_endpoint_id": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The VPC endpoint ID.",
+			"region_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The Neon region ID.",
 			},
-			"label": {
-				Type:        schema.TypeString,
+			"vpc_endpoint_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: requiresReplace,
+				Description:   "The VPC endpoint ID.",
+			},
+			"label": schema.StringAttribute{
 				Required:    true,
 				Description: "A descriptive label for the VPC endpoint.",
 			},
@@ -52,119 +89,105 @@ See details: https://neon.tech/docs/guides/neon-private-networking#enable-privat
 	}
 }
 
-func resourceVPCEndpointAssignmentCreate(_ context.Context, d *schema.ResourceData, meta interface{}) error {
-	err := meta.(sdkVPCEndpoint).AssignOrganizationVPCEndpoint(
-		d.Get("org_id").(string),
-		d.Get("region_id").(string),
-		d.Get("vpc_endpoint_id").(string),
-		neon.VPCEndpointAssignment{
-			Label: d.Get("label").(string),
-		},
-	)
-	if err == nil {
-		d.SetId(d.Get("vpc_endpoint_id").(string))
+func (r neonVPCEndpointAssignment) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
-	return err
-}
 
-func resourceVPCEndpointAssignmentRead(_ context.Context, d *schema.ResourceData, meta interface{}) error {
-	resp, err := meta.(sdkVPCEndpoint).GetOrganizationVPCEndpointDetails(
-		d.Get("org_id").(string),
-		d.Get("region_id").(string),
-		d.Get("vpc_endpoint_id").(string),
-	)
-	if err == nil {
-		err = d.Set("label", resp.Label)
+	var state neonVPCEndpointAssignmentResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	return err
-}
 
-func resourceVPCEndpointAssignmentDelete(_ context.Context, d *schema.ResourceData, meta interface{}) error {
-	err := meta.(sdkVPCEndpoint).DeleteOrganizationVPCEndpoint(
-		d.Get("org_id").(string),
-		d.Get("region_id").(string),
-		d.Get("vpc_endpoint_id").(string),
-	)
-	if err == nil {
-		d.SetId("")
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+		return r.client.AssignOrganizationVPCEndpoint(state.OrgID.ValueString(), state.RegionID.ValueString(),
+			state.VPCEndpointID.ValueString(), neon.VPCEndpointAssignment{Label: state.Label.ValueString()})
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	return err
+
+	state.ID = types.StringValue(state.OrgID.ValueString() + "/" + state.RegionID.ValueString() + "/" +
+		state.VPCEndpointID.ValueString())
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceVPCEndpointAssignmentCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.Retry(resourceVPCEndpointAssignmentCreate, ctx, d, meta)
-}
+func (r neonVPCEndpointAssignment) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
 
-func resourceVPCEndpointAssignmentReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceVPCEndpointAssignmentRead, ctx, d, meta, map[int]FallbackFn{
-		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			tflog.Debug(ctx, "VPC endpoint assignment not found, removing from state",
-				map[string]interface{}{
-					"id":        d.Get("vpc_endpoint_id"),
-					"org_id":    d.Get("org_id"),
-					"region_id": d.Get("region_id"),
-				})
-			d.SetId("")
-			return nil
-		}})
-}
+	var state neonVPCEndpointAssignmentResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-func resourceVPCEndpointAssignmentDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	return projectReadiness.RetryWithFallback(resourceVPCEndpointAssignmentDelete, ctx, d, meta, map[int]FallbackFn{
-		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
-			return nil
-		},
-		http.StatusUnprocessableEntity: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
-			d.SetId("")
-			return nil
-		},
-	})
-}
-
-func resourceVPCEndpointAssignmentImport(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	r, err := parseVPCEndpointAssignmentID(d.Id())
+	endpoint, err := r.client.GetOrganizationVPCEndpointDetails(state.OrgID.ValueString(), state.RegionID.ValueString(),
+		state.VPCEndpointID.ValueString())
 	if err != nil {
-		return nil, err
+		resp.Diagnostics.AddError("Error fetching VPC endpoint details", err.Error())
+		return
 	}
 
-	setResourceAttrsFromVPCEndpointAssignmentID(d, r)
-	if err := resourceVPCEndpointAssignmentRead(ctx, d, meta); err != nil {
-		return nil, err
+	state.Label = types.StringValue(endpoint.Label)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r neonVPCEndpointAssignment) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// reuse the Create method because the underlying API endpoint's command is idempotent,
+	// i.e., used for creation and update
+	request := resource.CreateRequest{
+		Config: tfsdk.Config{
+			Raw:    req.Plan.Raw,
+			Schema: req.Plan.Schema,
+		},
+	}
+	r.Create(ctx, request, &resource.CreateResponse{State: resp.State})
+}
+
+func (r neonVPCEndpointAssignment) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
 	}
 
-	// Set ID to vpc_endpoint_id only for backwards compatibility with existing state
-	d.SetId(r.VPCEndpointID)
+	var state neonVPCEndpointAssignmentResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	return []*schema.ResourceData{d}, nil
+	err := r.client.DeleteOrganizationVPCEndpoint(state.OrgID.ValueString(), state.RegionID.ValueString(),
+		state.VPCEndpointID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Error deleting VPC endpoint", err.Error())
+		return
+	}
+
+	resp.State.RemoveResource(ctx)
 }
 
-type sdkVPCEndpoint interface {
-	AssignOrganizationVPCEndpoint(string, string, string, neon.VPCEndpointAssignment) error
-	GetOrganizationVPCEndpointDetails(string, string, string) (neon.VPCEndpointDetails, error)
-	DeleteOrganizationVPCEndpoint(string, string, string) error
-}
-
-type vpcEndpointAssignmentID struct {
-	OrgID, RegionID, VPCEndpointID string
-}
-
-func setResourceAttrsFromVPCEndpointAssignmentID(d *schema.ResourceData, r vpcEndpointAssignmentID) {
-	_ = d.Set("org_id", r.OrgID)
-	_ = d.Set("region_id", r.RegionID)
-	_ = d.Set("vpc_endpoint_id", r.VPCEndpointID)
-}
-
-func parseVPCEndpointAssignmentID(s string) (vpcEndpointAssignmentID, error) {
-	spl := strings.Split(s, "/")
-	if len(spl) != 3 {
-		return vpcEndpointAssignmentID{}, errors.New(
-			"ID of this resource type shall follow the template: {{.OrgID}}/{{.RegionID}}/{{.VPCEndpointID}}",
+func (r neonVPCEndpointAssignment) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	els := strings.SplitN(req.ID, "/", 3)
+	if len(els) != 3 {
+		resp.Diagnostics.AddError(
+			"Invalid Terraform State VPC Endpoint Assignment ID",
+			"Expected an import ID in the form <org_id>/<region_id>/<vpc_endpoint_id>.",
 		)
+		return
 	}
-	return vpcEndpointAssignmentID{
-		OrgID:         spl[0],
-		RegionID:      spl[1],
-		VPCEndpointID: spl[2],
-	}, nil
+
+	// seed the state using the import id string and read the remote resource
+	request := resource.ReadRequest{}
+	resp.Diagnostics.Append(request.State.Set(ctx, &neonVPCEndpointAssignmentResourceModel{
+		ID:            types.StringValue(req.ID),
+		OrgID:         types.StringValue(els[0]),
+		RegionID:      types.StringValue(els[1]),
+		VPCEndpointID: types.StringValue(els[2]),
+	})...)
+	r.Read(ctx, request, &resource.ReadResponse{State: resp.State})
 }

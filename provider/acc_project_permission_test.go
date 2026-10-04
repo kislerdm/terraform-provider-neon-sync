@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
@@ -59,11 +58,7 @@ func TestProjectPermissionFSMIfResourceDeletedOutsideTerraform(t *testing.T) {
 			projectName := newProjectName(projectNamePrefix)
 			resource.Test(
 				t, resource.TestCase{
-					ProviderFactories: map[string]func() (*schema.Provider, error){
-						"neon": func() (*schema.Provider, error) {
-							return newAccTest(), nil
-						},
-					},
+					ProtoV6ProviderFactories: newProviderFactories(),
 					Steps: []resource.TestStep{
 						{
 							Config: fmt.Sprintf(`resource "neon_project" "this" {name = "%s"}
@@ -99,11 +94,7 @@ resource "neon_project_permission" "this" {
 }`, projectName, email)
 		resource.Test(
 			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
+				ProtoV6ProviderFactories: newProviderFactories(),
 				Steps: []resource.TestStep{
 					{
 						Config: config,

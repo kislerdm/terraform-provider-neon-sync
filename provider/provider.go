@@ -42,18 +42,14 @@ var p = &schema.Provider{
 		},
 	},
 	ResourcesMap: map[string]*schema.Resource{
-		"neon_project":                  resourceProject(),
-		"neon_endpoint":                 resourceEndpoint(),
-		"neon_project_permission":       resourceProjectPermission(),
-		"neon_vpc_endpoint_assignment":  resourceVPCEndpointAssignment(),
-		"neon_vpc_endpoint_restriction": resourceVPCEndpointRestriction(),
+		"neon_project":  resourceProject(),
+		"neon_endpoint": resourceEndpoint(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
-		"neon_project":              dataSourceProject(),
-		"neon_branches":             dataSourceBranches(),
-		"neon_branch_endpoints":     dataSourceBranchEndpoints(),
-		"neon_branch_roles":         dataSourceBranchRoles(),
-		"neon_branch_role_password": dataSourceBranchRolePassword(),
+		"neon_project":          dataSourceProject(),
+		"neon_branches":         dataSourceBranches(),
+		"neon_branch_endpoints": dataSourceBranchEndpoints(),
+		"neon_branch_roles":     dataSourceBranchRoles(),
 	},
 }
 
@@ -180,6 +176,9 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonBranchResource,
 		NewNeonRoleResource,
 		NewNeonDatabaseResource,
+		NewNeonProjectPermissionResource,
+		NewNeonVPCEndpointAssignmentResource,
+		NewNeonVPCEndpointRestrictionResource,
 	}
 }
 
