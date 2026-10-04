@@ -27,10 +27,6 @@ type neonProjectPermissionResourceModel struct {
 	Grantee   types.String `tfsdk:"grantee"`
 }
 
-func (m *neonProjectPermissionResourceModel) inferAttr(permission neon.ProjectPermission) {
-	m.ID = types.StringValue(permission.ID)
-}
-
 func NewNeonProjectPermissionResource() resource.Resource {
 	return &neonProjectPermission{}
 }
