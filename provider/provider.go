@@ -47,11 +47,10 @@ var p = &schema.Provider{
 		"neon_vpc_endpoint_restriction": resourceVPCEndpointRestriction(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
-		"neon_project":              dataSourceProject(),
-		"neon_branches":             dataSourceBranches(),
-		"neon_branch_endpoints":     dataSourceBranchEndpoints(),
-		"neon_branch_roles":         dataSourceBranchRoles(),
-		"neon_branch_role_password": dataSourceBranchRolePassword(),
+		"neon_project":          dataSourceProject(),
+		"neon_branches":         dataSourceBranches(),
+		"neon_branch_endpoints": dataSourceBranchEndpoints(),
+		"neon_branch_roles":     dataSourceBranchRoles(),
 	},
 }
 
