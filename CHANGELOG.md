@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_bucket`;
   - `neon_bucket_object`;
   - `neon_branch`;
+  - `neon_data_api`;
   - `neon_service_credential`.
 
 - Added the following data sources:

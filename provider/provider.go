@@ -175,6 +175,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonCustomBranchDomainResource,
 		NewNeonBranchResource,
 		NewNeonRoleResource,
+		NewNeonDataAPIResource,
 		NewNeonDatabaseResource,
 		NewNeonProjectPermissionResource,
 		NewNeonVPCEndpointAssignmentResource,
