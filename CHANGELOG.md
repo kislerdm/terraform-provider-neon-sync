@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_ai_gateway`;
   - `neon_bucket`;
 
+
+- Migrated the following resources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
+
+
+- Migrated the following data sources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
+  - `neon_branch_roles`;
+
 ### Changed
 
 - Updated dependencies:
