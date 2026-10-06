@@ -219,7 +219,7 @@ resource "neon_bucket" "this" {
 `,
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
-						ImportStateId: fmt.Sprintf("foo"),
+						ImportStateId: "foo",
 						ExpectError: regexp.MustCompile(
 							"Expected an import ID in the form <project_id>/<branch_id>/<bucket_name>",
 						),
@@ -234,7 +234,7 @@ resource "neon_bucket" "this" {
 `,
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
-						ImportStateId: fmt.Sprintf("0/br-1/foo/asd"),
+						ImportStateId: "0/br-1/foo/asd",
 						ExpectError: regexp.MustCompile(
 							"Expected an import ID in the form <project_id>/<branch_id>/<bucket_name>",
 						),
@@ -249,7 +249,7 @@ resource "neon_bucket" "this" {
 `,
 						ImportState:   true,
 						ResourceName:  "neon_bucket.this",
-						ImportStateId: fmt.Sprintf("br-1/foo"),
+						ImportStateId: "br-1/foo",
 						ExpectError: regexp.MustCompile(
 							"Expected an import ID in the form <project_id>/<branch_id>/<bucket_name>",
 						),

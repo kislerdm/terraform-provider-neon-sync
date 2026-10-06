@@ -113,7 +113,6 @@ func (bucketAccessLevelValidator) ValidateString(_ context.Context, req validato
 			err.Error(),
 		)
 	}
-	return
 }
 
 func (r *neonBucketResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {

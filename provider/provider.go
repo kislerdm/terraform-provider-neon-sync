@@ -49,7 +49,6 @@ var p = &schema.Provider{
 		"neon_project":          dataSourceProject(),
 		"neon_branches":         dataSourceBranches(),
 		"neon_branch_endpoints": dataSourceBranchEndpoints(),
-		"neon_branch_roles":     dataSourceBranchRoles(),
 	},
 }
 
@@ -188,6 +187,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		NewAIGatewayDataSource,
 		NewBucketDataSource,
 		NewActiveRegionsDataSource,
+		NewBranchRolesDataSource,
 	}
 }
 

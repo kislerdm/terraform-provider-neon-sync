@@ -179,7 +179,6 @@ func (r *neonCustomBranchDomain) Create(ctx context.Context, req resource.Create
 }
 
 func (r *neonCustomBranchDomain) Update(_ context.Context, _ resource.UpdateRequest, _ *resource.UpdateResponse) {
-	return
 }
 
 func (r *neonCustomBranchDomain) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

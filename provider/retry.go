@@ -88,12 +88,12 @@ func (r *delay) Do(ctx context.Context, fn func(context.Context) error,
 	return err
 }
 
-// TODO: refactor ctx to be the arg 0
+// TODO: refactor ctx to be the arg 0.
 func (r *delay) RetryFramework(fn func(context.Context) error, ctx context.Context) frameworkdiag.Diagnostics {
 	return frameworkDiagnostics(r.Do(ctx, fn, nil))
 }
 
-// TODO: refactor ctx to be the arg 0
+// TODO: refactor ctx to be the arg 0.
 func (r *delay) RetryWithFallbackFramework(fn func(context.Context) error, ctx context.Context,
 	fallbacks map[int]func(context.Context) error) frameworkdiag.Diagnostics {
 	return frameworkDiagnostics(r.Do(ctx, fn, fallbacks))
