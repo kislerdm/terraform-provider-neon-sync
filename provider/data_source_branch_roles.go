@@ -45,9 +45,8 @@ func (d *neonBranchRolesDataSource) Schema(_ context.Context, _ datasource.Schem
 		Description: "Lists PostgreSQL roles in a Neon branch.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Optional:            true,
 				Computed:            true,
-				MarkdownDescription: "Role-list scope in the form `<project_id>/<branch_id>/roles`. A configured legacy ID is accepted for compatibility and replaced with this scope on read.",
+				MarkdownDescription: "Role-list scope in the form `<project_id>/<branch_id>`.",
 			},
 			"project_id": schema.StringAttribute{
 				Required:    true,
@@ -68,7 +67,7 @@ func (d *neonBranchRolesDataSource) Schema(_ context.Context, _ datasource.Schem
 						},
 						"protected": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether the role is system-protected. Defaults to true when the API omits this field, preserving legacy behavior.",
+							Description: "Whether the role is system-protected. Defaults to true when the API omits this field.",
 						},
 					},
 				},
@@ -94,13 +93,14 @@ func (d *neonBranchRolesDataSource) Configure(_ context.Context, req datasource.
 }
 
 func (d *neonBranchRolesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if d.client == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
+		return
+	}
+
 	var data neonBranchRolesDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
-		return
-	}
-	if d.client == nil {
-		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
 		return
 	}
 
@@ -125,14 +125,19 @@ func (d *neonBranchRolesDataSource) Read(ctx context.Context, req datasource.Rea
 			Protected: types.BoolValue(protected),
 		})
 	}
+
 	var diags diag.Diagnostics
-	data.Roles, diags = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"name": types.StringType, "protected": types.BoolType,
-	}}, roles)
+	data.Roles, diags = types.ListValueFrom(ctx,
+		types.ObjectType{AttrTypes: map[string]attr.Type{
+			"name":      types.StringType,
+			"protected": types.BoolType,
+		}}, roles)
+
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	data.ID = types.StringValue(fmt.Sprintf("%s/%s/roles", data.ProjectID.ValueString(), data.BranchID.ValueString()))
+
+	data.ID = types.StringValue(fmt.Sprintf("%s/%s", data.ProjectID.ValueString(), data.BranchID.ValueString()))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
