@@ -86,7 +86,7 @@ func (d *neonBranchRolesDataSource) Configure(_ context.Context, req datasource.
 		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", "Expected *providerAdapter, got an unexpected type.")
 		return
 	}
-	if adapter == nil || adapter.sdk == nil {
+	if adapter.sdk == nil {
 		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
 		return
 	}
@@ -101,10 +101,6 @@ func (d *neonBranchRolesDataSource) Read(ctx context.Context, req datasource.Rea
 	}
 	if d.client == nil {
 		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
-		return
-	}
-	if data.ProjectID.IsNull() || data.ProjectID.IsUnknown() || data.BranchID.IsNull() || data.BranchID.IsUnknown() {
-		resp.Diagnostics.AddError("Unknown Branch Role Scope", "project_id and branch_id must be known, non-null strings before reading branch roles.")
 		return
 	}
 
