@@ -116,7 +116,6 @@ func (d *neonBranchRolesDataSource) Read(ctx context.Context, req datasource.Rea
 
 	roles := make([]branchRoleModel, 0, len(result.Roles))
 	for _, role := range result.Roles {
-		// SDK v2 treated a missing protection flag as true; keep that output contract.
 		protected := true
 		if role.Protected != nil {
 			protected = *role.Protected
