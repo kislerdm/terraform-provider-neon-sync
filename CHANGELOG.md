@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Migrated the following data sources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
   - `neon_branch_roles`;
+  - `neon_branch_endpoints`;
 
 ### Changed
 
