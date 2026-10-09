@@ -46,9 +46,8 @@ var p = &schema.Provider{
 		"neon_endpoint": resourceEndpoint(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
-		"neon_project":          dataSourceProject(),
-		"neon_branches":         dataSourceBranches(),
-		"neon_branch_endpoints": dataSourceBranchEndpoints(),
+		"neon_project":  dataSourceProject(),
+		"neon_branches": dataSourceBranches(),
 	},
 }
 
@@ -188,6 +187,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		NewBucketDataSource,
 		NewActiveRegionsDataSource,
 		NewBranchRolesDataSource,
+		NewBranchEndpointsDataSource,
 	}
 }
 
