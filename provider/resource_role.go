@@ -26,8 +26,6 @@ type neonRoleResourceModel struct {
 	ProjectID typesTFSDK.String `tfsdk:"project_id"`
 	BranchID  typesTFSDK.String `tfsdk:"branch_id"`
 	Name      typesTFSDK.String `tfsdk:"name"`
-	// TODO: remove after the release with the ephemeral resource neon_role
-	Password  typesTFSDK.String `tfsdk:"password"`
 	Protected typesTFSDK.Bool   `tfsdk:"protected"`
 	// 	TODO: add no_login support
 }
@@ -35,7 +33,6 @@ type neonRoleResourceModel struct {
 func (m *neonRoleResourceModel) inferAttr(role neon.Role) {
 	m.ID = typesTFSDK.StringValue(m.ProjectID.ValueString() + "/" + role.BranchID + "/" + role.Name)
 	m.Name = typesTFSDK.StringValue(role.Name)
-	m.Password = typesTFSDK.StringPointerValue(role.Password)
 	m.Protected = typesTFSDK.BoolPointerValue(role.Protected)
 }
 
@@ -91,12 +88,6 @@ See details: https://neon.tech/docs/manage/users/
 				Required:      true,
 				PlanModifiers: requiresReplace,
 				Description:   "Role name.",
-			},
-			"password": schemaTFSDK.StringAttribute{
-				Computed:           true,
-				Sensitive:          true,
-				DeprecationMessage: "Use the Ephemeral resources `neon_role` instead.",
-				Description:        "Database authentication password.",
 			},
 			"protected": schemaTFSDK.BoolAttribute{
 				Computed:    true,
