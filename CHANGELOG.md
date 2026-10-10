@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_ai_gateway`;
   - `neon_bucket`;
 
+- [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] Added the following ephemeral resources:
+  - `neon_role`.
 
 - Migrated the following resources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
 
@@ -30,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrated the following data sources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
   - `neon_branch_roles`;
   - `neon_branch_endpoints`;
+
+### Removed
+
+- [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] **[BREAKING]** Removed the read-only attribute `password` from the `neon_role` resource.
+- [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] **[BREAKING]** Removed the data source `neon_branch_role_password`.
 
 ### Changed
 
