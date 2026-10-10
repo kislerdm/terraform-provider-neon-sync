@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	frameworkprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -79,7 +80,7 @@ func NewFramework(version string) frameworkprovider.Provider {
 	return &frameworkProvider{version: version}
 }
 
-var _ frameworkprovider.Provider = (*frameworkProvider)(nil)
+var _ frameworkprovider.ProviderWithEphemeralResources = (*frameworkProvider)(nil)
 
 // frameworkProvider is the Framework portion of the provider. It is served
 // through terraform-plugin-mux alongside the legacy SDK provider.
@@ -153,6 +154,7 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 
 	resp.ResourceData = &providerClient
 	resp.DataSourceData = &providerClient
+	resp.EphemeralResourceData = &providerClient
 }
 
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {
@@ -188,6 +190,12 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		NewActiveRegionsDataSource,
 		NewBranchRolesDataSource,
 		NewBranchEndpointsDataSource,
+	}
+}
+
+func (p *frameworkProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewNeonRoleEphemeralResource,
 	}
 }
 
