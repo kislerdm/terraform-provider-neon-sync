@@ -196,6 +196,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 func (p *frameworkProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
 	return []func() ephemeral.EphemeralResource{
 		NewNeonRoleEphemeralResource,
+		NewNeonConnectionURIEphemeralResource,
 	}
 }
 

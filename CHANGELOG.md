@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] Added the following ephemeral resources:
   - `neon_role`.
+  - `neon_connection_uri`.
 
 - Migrated the following resources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
 
