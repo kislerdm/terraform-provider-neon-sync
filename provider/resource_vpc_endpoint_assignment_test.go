@@ -310,8 +310,4 @@ label           = "foo"
 			},
 		})
 	})
-
-	t.Run("shall destroy the resource", func(t *testing.T) {
-		t.Skip("todo")
-	})
 }
