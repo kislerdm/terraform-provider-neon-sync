@@ -12,12 +12,4 @@ description: |-
 
 {{ tffile "examples/data-sources/neon_branch_roles/data-source.tf" }}
 
-## SDK v2 Migration
-
-Remove any configured `roles` blocks before upgrading.
-`roles` is now a read-only list; expressions such as `roles[0].name` remain unchanged.
-Back up Terraform state and the original configuration before changing provider versions.
-The ID remains `<project_id>/<branch_id>/roles`, and an omitted protection flag still returns `true`.
-This data source returns role names and protection flags, never passwords.
-
 {{ .SchemaMarkdown | trimspace }}
