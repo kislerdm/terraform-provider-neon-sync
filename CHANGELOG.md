@@ -24,22 +24,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neon_bucket`;
 
 - [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] Added the following ephemeral resources:
-  - `neon_role`.
+  - `neon_role`;
   - `neon_connection_uri`.
 
-- Migrated the following resources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
-
-
-- Migrated the following data sources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
-  - `neon_branch_roles`;
-  - `neon_branch_endpoints`;
+- Added the following attributes to the `neon_endpoint` resource:
+  - `passwordless_access`;
+  - `enabled_libraries`;
+  - `enabled_libraries_use_defaults`.
 
 ### Removed
 
 - [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] **[BREAKING]** Removed the read-only attribute `password` from the `neon_role` resource.
 - [[#51](https://github.com/neondatabase/terraform-provider-neon/issues/51)] **[BREAKING]** Removed the data source `neon_branch_role_password`.
+- **[BREAKING]** Removed the attribute `proxy_host` from the resource `neon_endpoint`.
 
 ### Changed
+
+- Migrated the following resources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
+  - `neon_branch`;
+  - `neon_api_key`;
+  - `neon_role`;
+  - `neon_database`;
+  - `neon_project_permission`;
+  - `neon_jwks_url`;
+  - `neon_vpc_endpoint_assignment`;
+  - `neon_vpc_endpoint_restriction`;
+  - `neon_org_api_key`;
+  - `neon_endpoint`.
+
+- Migrated the following data sources from Terraform Plugin SDK v2 to Terraform Plugin Framework:
+  - `neon_branch_roles`;
+  - `neon_branch_endpoints`.
+
+- Changed the resource `neon_endpoint` by renaming the attribute `host_pooling` to `host_pooler`. 
 
 - Updated dependencies:
   - Neon Go SDK: [v0.27.0](https://github.com/kislerdm/neon-sdk-go/compare/v0.22.0...v0.27.0)

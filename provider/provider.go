@@ -43,8 +43,7 @@ var p = &schema.Provider{
 		},
 	},
 	ResourcesMap: map[string]*schema.Resource{
-		"neon_project":  resourceProject(),
-		"neon_endpoint": resourceEndpoint(),
+		"neon_project": resourceProject(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
 		"neon_project":  dataSourceProject(),
@@ -180,6 +179,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonProjectPermissionResource,
 		NewNeonVPCEndpointAssignmentResource,
 		NewNeonVPCEndpointRestrictionResource,
+		NewNeonEndpointResource,
 	}
 }
 
