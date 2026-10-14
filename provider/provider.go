@@ -202,6 +202,13 @@ func (p *frameworkProvider) EphemeralResources(_ context.Context) []func() ephem
 	}
 }
 
+func (p *frameworkProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewNeonRoleEphemeralResource,
+		NewNeonConnectionURIEphemeralResource,
+	}
+}
+
 func NewServer(version string) (tfprotov6.ProviderServer, error) {
 	legacyServer, err := tf5to6server.UpgradeServer(context.Background(), func() tfprotov5.ProviderServer {
 		return New(version).GRPCProvider()
