@@ -1,0 +1,16 @@
+---
+page_title: "{{ .Name }} {{ .Type }} - {{.ProviderName}}"
+description: |-
+  {{ .Description }}
+---
+
+# {{ .Name }} ({{ .Type }})
+
+{{ .Description }}
+The `branches` collection is read-only; its nested fields cannot be configured as filters.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/neon_branches/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
