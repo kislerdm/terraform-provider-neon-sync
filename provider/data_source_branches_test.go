@@ -154,7 +154,6 @@ func testBranchesDataSource(t *testing.T, legacy bool) {
 			status:    http.StatusOK,
 			bodies: []string{
 				branchesTwoResponse,
-				// JSON null and omission decode identically in the pinned SDK pointers.
 				regexp.MustCompile(`"name": "second",`).ReplaceAllString(branchesTwoResponse, `"name": "second",
       "parent_id": null,
       "logical_size": null,
@@ -215,7 +214,7 @@ func testBranchesDataSource(t *testing.T, legacy bool) {
 		},
 	} {
 		if legacy && tt.wantError != "" {
-			continue // The legacy reader discards SDK errors; only successful output is compatible.
+			continue
 		}
 		t.Run(tt.name, func(t *testing.T) {
 			for i, body := range tt.bodies {

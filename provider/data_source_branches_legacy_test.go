@@ -10,7 +10,6 @@ import (
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-// Frozen from 580452de7d04f13d23196c8eae60a020106835aa to test the real SDK v2 boundary.
 func legacyBranchesSchema() *schema.Resource {
 	return &schema.Resource{
 		Description:   "Fetch Project Branches.",
@@ -68,7 +67,6 @@ func legacyBranchesRead(ctx context.Context, d *schema.ResourceData, meta interf
 
 	d.SetId(fmt.Sprintf("%s/branches", projectID))
 
-	// TODO: add search qualifier for branches
 	resp, err := meta.(*neon.Client).ListProjectBranches(projectID, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		diag.FromErr(err)

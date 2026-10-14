@@ -31,7 +31,6 @@ type branchModel struct {
 	Primary     types.Bool   `tfsdk:"primary"`
 }
 
-// NewBranchesDataSource returns the project branch-list data source.
 func NewBranchesDataSource() datasource.DataSource {
 	return &neonBranchesDataSource{}
 }

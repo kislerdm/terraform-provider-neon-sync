@@ -65,7 +65,8 @@ func (r *delay) Do(ctx context.Context, fn func(context.Context) error,
 			switch e.HTTPCode {
 			case 200:
 				return nil
-			case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusLocked:
+			case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusLocked,
+				http.StatusServiceUnavailable:
 				tflog.Debug(ctx, "API call delay "+strconv.FormatInt(r.delay.Milliseconds(), 10)+" ms.")
 				err = e
 				i++

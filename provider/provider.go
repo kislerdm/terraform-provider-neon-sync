@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	frameworkprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -37,13 +38,13 @@ var p = &schema.Provider{
 		"api_key": {
 			Type:        schema.TypeString,
 			Optional:    true,
+			Sensitive:   true,
 			Description: "API access key. Default is read from the environment variable `NEON_API_KEY`.",
-			Default:     os.Getenv("NEON_API_KEY"),
+			DefaultFunc: schema.EnvDefaultFunc("NEON_API_KEY", ""),
 		},
 	},
 	ResourcesMap: map[string]*schema.Resource{
-		"neon_project":  resourceProject(),
-		"neon_endpoint": resourceEndpoint(),
+		"neon_project": resourceProject(),
 	},
 	DataSourcesMap: map[string]*schema.Resource{
 		"neon_project": dataSourceProject(),
@@ -78,7 +79,7 @@ func NewFramework(version string) frameworkprovider.Provider {
 	return &frameworkProvider{version: version}
 }
 
-var _ frameworkprovider.Provider = (*frameworkProvider)(nil)
+var _ frameworkprovider.ProviderWithEphemeralResources = (*frameworkProvider)(nil)
 
 // frameworkProvider is the Framework portion of the provider. It is served
 // through terraform-plugin-mux alongside the legacy SDK provider.
@@ -101,6 +102,7 @@ func (p *frameworkProvider) Schema(_ context.Context, _ frameworkprovider.Schema
 		Attributes: map[string]providerschema.Attribute{
 			"api_key": providerschema.StringAttribute{
 				Optional:            true,
+				Sensitive:           true,
 				MarkdownDescription: "API access key. Default is read from the environment variable `NEON_API_KEY`.",
 			},
 		},
@@ -152,6 +154,7 @@ func (p *frameworkProvider) Configure(ctx context.Context, req frameworkprovider
 
 	resp.ResourceData = &providerClient
 	resp.DataSourceData = &providerClient
+	resp.EphemeralResourceData = &providerClient
 }
 
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {
@@ -177,6 +180,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		NewNeonProjectPermissionResource,
 		NewNeonVPCEndpointAssignmentResource,
 		NewNeonVPCEndpointRestrictionResource,
+		NewNeonEndpointResource,
 	}
 }
 
@@ -188,6 +192,13 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		NewBranchRolesDataSource,
 		NewBranchEndpointsDataSource,
 		NewBranchesDataSource,
+	}
+}
+
+func (p *frameworkProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewNeonRoleEphemeralResource,
+		NewNeonConnectionURIEphemeralResource,
 	}
 }
 
