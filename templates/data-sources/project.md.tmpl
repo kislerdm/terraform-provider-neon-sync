@@ -1,0 +1,25 @@
+---
+page_title: "{{ .Name }} {{ .Type }} - {{.ProviderName}}"
+description: |-
+  {{ .Description }}
+---
+
+# {{ .Name }} ({{ .Type }})
+
+{{ .Description }}
+
+The data source selects the first branch with the legacy `primary` flag set, then the oldest database and oldest enabled read-write endpoint on that branch.
+It retains API response order when creation timestamps tie.
+It does not substitute the API `default` flag when `primary` is absent.
+A missing primary branch, eligible endpoint, or database produces an error.
+
+The API key must permit revealing the selected database owner's password.
+The password and both connection URIs are sensitive, but Terraform still stores them in state.
+Protect state and plan files; do not publish credential-bearing output.
+Only `id` is configurable; computed outputs are not filters.
+
+## Example Usage
+
+{{ tffile "examples/data-sources/neon_project/data-source.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}

@@ -46,9 +46,7 @@ var p = &schema.Provider{
 	ResourcesMap: map[string]*schema.Resource{
 		"neon_project": resourceProject(),
 	},
-	DataSourcesMap: map[string]*schema.Resource{
-		"neon_project": dataSourceProject(),
-	},
+	DataSourcesMap: map[string]*schema.Resource{},
 }
 
 // New returns the provider.
@@ -192,6 +190,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		NewBranchRolesDataSource,
 		NewBranchEndpointsDataSource,
 		NewBranchesDataSource,
+		NewProjectDataSource,
 	}
 }
 
