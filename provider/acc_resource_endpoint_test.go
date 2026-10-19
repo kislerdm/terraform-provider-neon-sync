@@ -1,9 +1,11 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -44,12 +46,49 @@ func TestEndpoint(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.Disabled), r.Primary.Attributes["disabled"])
 		assert.Equal(t, string(resp.Endpoint.Provisioner), r.Primary.Attributes["compute_provisioner"])
 		assert.Equal(t, resp.Endpoint.Host, r.Primary.Attributes["host"])
-		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.AutoscalingLimitMinCu), r.Primary.Attributes["autoscaling_limit_min_cu"])
-		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.AutoscalingLimitMaxCu), r.Primary.Attributes["autoscaling_limit_max_cu"])
-		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.SuspendTimeoutSeconds), r.Primary.Attributes["suspend_timeout_seconds"])
+		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.AutoscalingLimitMinCu),
+			r.Primary.Attributes["autoscaling_limit_min_cu"])
+		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.AutoscalingLimitMaxCu),
+			r.Primary.Attributes["autoscaling_limit_max_cu"])
+		assert.Equal(t, fmt.Sprintf("%v", resp.Endpoint.SuspendTimeoutSeconds),
+			r.Primary.Attributes["suspend_timeout_seconds"])
 		assert.Equal(t, resp.Endpoint.Type.String(), r.Primary.Attributes["type"])
 		if resp.Endpoint.Name != nil {
 			assert.Equal(t, *resp.Endpoint.Name, r.Primary.Attributes["name"])
+		}
+		if resp.Endpoint.Settings.PgSettings != nil && len(*resp.Endpoint.Settings.PgSettings) > 0 {
+			var actual neon.PgSettingsData
+			actualRaw, ok := r.Primary.Attributes["pg_settings"]
+			assert.Truef(t, ok, "no pg_settings attribute found")
+			assert.NoErrorf(t, json.Unmarshal([]byte(actualRaw), &actual), "could not deserialize pg_settings")
+			assert.EqualValuesf(t, *resp.Endpoint.Settings.PgSettings, actual,
+				"unexpected pg_settings")
+		}
+		if resp.Endpoint.Settings.PreloadLibraries != nil {
+			cnt, ok := r.Primary.Attributes["enabled_libraries.#"]
+			assert.Truef(t, ok, "unexpected size of enabled_libraries")
+			assert.EqualValuesf(t,
+				fmt.Sprintf("%d", len(resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries)), cnt,
+				"unexpected size of enabled_libraries")
+
+			if len(resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries) > 0 {
+				for i, lib := range resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries {
+					assert.Equalf(t, lib, r.Primary.Attributes[fmt.Sprintf("enabled_libraries.%d", i)],
+						"unexpected value for enabled_libraries[%d]", i)
+				}
+			}
+
+			actualRaw, ok := r.Primary.Attributes["enabled_libraries_use_defaults"]
+			if resp.Endpoint.Settings.PreloadLibraries.UseDefaults == nil {
+				assert.Truef(t, !ok || actualRaw == "", "unexpected enabled_libraries_use_defaults value")
+			} else {
+				assert.Truef(t, ok, "no enabled_libraries_use_defaults attribute found")
+				actual, err := strconv.ParseBool(actualRaw)
+				assert.NoErrorf(t, err, "could not parse enabled_libraries_use_defaults")
+				assert.EqualValuesf(t, *resp.Endpoint.Settings.PreloadLibraries.UseDefaults, actual,
+					"unexpected enabled_libraries_use_defaults")
+			}
+
 		}
 		return nil
 	}
@@ -63,14 +102,14 @@ func TestEndpoint(t *testing.T) {
 				Steps: []resource.TestStep{
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
-
-resource "neon_endpoint" "this" {
-	project_id = neon_project.this.id
-	branch_id  = neon_project.this.default_branch_id
-	region_id  = neon_project.this.region_id
-	type       = "read_only"
-}
-`, projectName),
+					
+					resource "neon_endpoint" "this" {
+						project_id = neon_project.this.id
+						branch_id  = neon_project.this.default_branch_id
+						region_id  = neon_project.this.region_id
+						type       = "read_only"
+					}
+					`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_endpoint.this", "type", "read_only"),
 							resource.TestCheckResourceAttrSet("neon_endpoint.this", "host"),
@@ -95,14 +134,14 @@ resource "neon_endpoint" "this" {
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
 					
-					resource "neon_endpoint" "this" {
-						project_id = neon_project.this.id
-						branch_id  = neon_project.this.default_branch_id
-						region_id  = neon_project.this.region_id
-						type       = "read_only"
-						name       = %q
-					}
-					`, projectName, "foo"),
+										resource "neon_endpoint" "this" {
+											project_id = neon_project.this.id
+											branch_id  = neon_project.this.default_branch_id
+											region_id  = neon_project.this.region_id
+											type       = "read_only"
+											name       = %q
+										}
+										`, projectName, "foo"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_endpoint.this", "name", "foo"),
 							verify,
@@ -112,18 +151,20 @@ resource "neon_endpoint" "this" {
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
 					
-					resource "neon_endpoint" "this" {
-						project_id = neon_project.this.id
-						branch_id  = neon_project.this.default_branch_id
-						region_id  = neon_project.this.region_id
-						type       = "read_only"
+										resource "neon_endpoint" "this" {
+											project_id = neon_project.this.id
+											branch_id  = neon_project.this.default_branch_id
+											region_id  = neon_project.this.region_id
+											type       = "read_only"
 					
-						autoscaling_limit_min_cu = 0.25
-						autoscaling_limit_max_cu = 0.5
-						suspend_timeout_seconds  = 120
-					}
-					`, projectName),
+											autoscaling_limit_min_cu = 0.25
+											autoscaling_limit_max_cu = 0.5
+											suspend_timeout_seconds  = 120
+										}
+										`, projectName),
 						Check: resource.ComposeTestCheckFunc(
+							// the name remains as set in the prev. step despite the config removal from the manifest
+							resource.TestCheckResourceAttr("neon_endpoint.this", "name", "foo"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_min_cu", "0.25"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_max_cu", "0.5"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "suspend_timeout_seconds", "120"),
@@ -134,15 +175,16 @@ resource "neon_endpoint" "this" {
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
 					
-					resource "neon_endpoint" "this" {
-						project_id = neon_project.this.id
-						branch_id  = neon_project.this.default_branch_id
-						region_id  = neon_project.this.region_id
-						type       = "read_only"
-						disabled   = true
-					}
-					`, projectName),
+										resource "neon_endpoint" "this" {
+											project_id = neon_project.this.id
+											branch_id  = neon_project.this.default_branch_id
+											region_id  = neon_project.this.region_id
+											type       = "read_only"
+											disabled   = true
+										}
+										`, projectName),
 						Check: resource.ComposeTestCheckFunc(
+							// the autoscaling configs remain as set in the prev. step despite the config removal from the manifest
 							resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_min_cu", "0.25"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_max_cu", "0.5"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "suspend_timeout_seconds", "120"),
@@ -153,21 +195,21 @@ resource "neon_endpoint" "this" {
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
 					
-					resource "neon_endpoint" "this" {
-						project_id = neon_project.this.id
-						branch_id  = neon_project.this.default_branch_id
-						region_id  = neon_project.this.region_id
-						type       = "read_only"
-					}
-					`, projectName),
+										resource "neon_endpoint" "this" {
+											project_id = neon_project.this.id
+											branch_id  = neon_project.this.default_branch_id
+											region_id  = neon_project.this.region_id
+											type       = "read_only"
+										}
+										`, projectName),
 						Check: resource.ComposeTestCheckFunc(
+							// the disabled config remains as set in the prev. step despite the config removal from the manifest
 							resource.TestCheckResourceAttr("neon_endpoint.this", "disabled", "true"),
 							verify,
 						),
 					},
 					// update pg settings
-					// NOTE: unhappy path is used because it appears that pg settings could not be changed
-					// when an endpoint is provisioned for default branch.
+					// NOTE: unhappy path is used because a read_only endpoint may not mutate pg_settings(?)
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
 					
@@ -185,20 +227,67 @@ resource "neon_endpoint" "this" {
 					// update enabled_libraries
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
-
-resource "neon_endpoint" "this" {
-	project_id        = neon_project.this.id
-	branch_id         = neon_project.this.default_branch_id
-	region_id         = neon_project.this.region_id
-	type              = "read_only"
-	enabled_libraries = ["uuid-ossp"]
-}
-`, projectName),
+					
+					resource "neon_endpoint" "this" {
+						project_id        = neon_project.this.id
+						branch_id         = neon_project.this.default_branch_id
+						region_id         = neon_project.this.region_id
+						type              = "read_only"
+						enabled_libraries = ["uuid-ossp"]
+					}
+					`, projectName),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#",
 								"1"),
 							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0",
 								"uuid-ossp"),
+							resource.TestCheckResourceAttr("neon_endpoint.this",
+								"enabled_libraries_use_defaults", "false"),
+							verify,
+						),
+					},
+					// update enabled_libraries_use_defaults
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
+
+					resource "neon_endpoint" "this" {
+						project_id                     = neon_project.this.id
+						branch_id                      = neon_project.this.default_branch_id
+						region_id                      = neon_project.this.region_id
+						type                           = "read_only"
+						enabled_libraries              = ["uuid-ossp"]
+						enabled_libraries_use_defaults = true   
+					}
+					`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#",
+								"1"),
+							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0",
+								"uuid-ossp"),
+							resource.TestCheckResourceAttr("neon_endpoint.this",
+								"enabled_libraries_use_defaults", "true"),
+							verify,
+						),
+					},
+					// rm enabled_libraries and enabled_libraries_use_defaults from the manifest
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
+
+					resource "neon_endpoint" "this" {
+						project_id                     = neon_project.this.id
+						branch_id                      = neon_project.this.default_branch_id
+						region_id                      = neon_project.this.region_id
+						type                           = "read_only"
+					}
+					`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#",
+								"1"),
+							resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0",
+								"uuid-ossp"),
+							resource.TestCheckResourceAttr("neon_endpoint.this",
+								"enabled_libraries_use_defaults", "true"),
+							verify,
 						),
 					},
 				},

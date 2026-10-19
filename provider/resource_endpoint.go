@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"reflect"
-	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -31,26 +31,26 @@ type neonEndpointResource struct {
 }
 
 type neonEndpointResourceModel struct {
-	ID                          types.String      `tfsdk:"id"`
-	ProjectID                   types.String      `tfsdk:"project_id"`
-	BranchID                    types.String      `tfsdk:"branch_id"`
-	RegionID                    types.String      `tfsdk:"region_id"`
-	Name                        types.String      `tfsdk:"name"`
-	Type                        types.String      `tfsdk:"type"`
-	AutoscalingLimitMinCU       types.Float64     `tfsdk:"autoscaling_limit_min_cu"`
-	AutoscalingLimitMaxCU       types.Float64     `tfsdk:"autoscaling_limit_max_cu"`
-	SuspendTimeoutSeconds       types.Int64       `tfsdk:"suspend_timeout_seconds"`
-	ComputeProvisioner          types.String      `tfsdk:"compute_provisioner"`
-	PgSettings                  map[string]string `tfsdk:"pg_settings"`
-	Disabled                    types.Bool        `tfsdk:"disabled"`
-	EnabledLibraries            []string          `tfsdk:"enabled_libraries"`
-	EnabledLibrariesUseDefaults types.Bool        `tfsdk:"enabled_libraries_use_defaults"`
-	PasswordlessAccess          types.Bool        `tfsdk:"passwordless_access"`
-	Host                        types.String      `tfsdk:"host"`
-	HostPooler                  types.String      `tfsdk:"host_pooler"`
+	ID                          types.String  `tfsdk:"id"`
+	ProjectID                   types.String  `tfsdk:"project_id"`
+	BranchID                    types.String  `tfsdk:"branch_id"`
+	RegionID                    types.String  `tfsdk:"region_id"`
+	Name                        types.String  `tfsdk:"name"`
+	Type                        types.String  `tfsdk:"type"`
+	AutoscalingLimitMinCU       types.Float64 `tfsdk:"autoscaling_limit_min_cu"`
+	AutoscalingLimitMaxCU       types.Float64 `tfsdk:"autoscaling_limit_max_cu"`
+	SuspendTimeoutSeconds       types.Int64   `tfsdk:"suspend_timeout_seconds"`
+	ComputeProvisioner          types.String  `tfsdk:"compute_provisioner"`
+	PgSettings                  types.Map     `tfsdk:"pg_settings"`
+	Disabled                    types.Bool    `tfsdk:"disabled"`
+	EnabledLibraries            types.List    `tfsdk:"enabled_libraries"`
+	EnabledLibrariesUseDefaults types.Bool    `tfsdk:"enabled_libraries_use_defaults"`
+	PasswordlessAccess          types.Bool    `tfsdk:"passwordless_access"`
+	Host                        types.String  `tfsdk:"host"`
+	HostPooler                  types.String  `tfsdk:"host_pooler"`
 }
 
-func (v *neonEndpointResourceModel) inferAttr(endpoint neon.Endpoint) {
+func (v *neonEndpointResourceModel) inferAttr(ctx context.Context, endpoint neon.Endpoint, diagnostics *diag.Diagnostics) {
 	v.ID = types.StringValue(endpoint.ID)
 	v.ProjectID = types.StringValue(endpoint.ProjectID)
 	v.BranchID = types.StringValue(endpoint.BranchID)
@@ -61,21 +61,100 @@ func (v *neonEndpointResourceModel) inferAttr(endpoint neon.Endpoint) {
 	v.AutoscalingLimitMaxCU = types.Float64Value(float64(endpoint.AutoscalingLimitMaxCu))
 	v.SuspendTimeoutSeconds = types.Int64Value(int64(endpoint.SuspendTimeoutSeconds))
 	v.ComputeProvisioner = types.StringValue(string(endpoint.Provisioner))
-	if endpoint.Settings.PgSettings != nil && len(*endpoint.Settings.PgSettings) > 0 {
-		v.PgSettings = make(map[string]string, len(*endpoint.Settings.PgSettings))
+	if endpoint.Settings.PgSettings != nil {
+		tmp := make(map[string]string, len(*endpoint.Settings.PgSettings))
 		for k, val := range *endpoint.Settings.PgSettings {
-			v.PgSettings[k] = fmt.Sprintf("%v", val)
+			tmp[k] = fmt.Sprintf("%v", val)
 		}
+		var settingsDiags diag.Diagnostics
+		v.PgSettings, settingsDiags = types.MapValueFrom(ctx, types.StringType, tmp)
+		diagnostics.Append(settingsDiags...)
+	} else {
+		v.PgSettings = types.MapNull(types.StringType)
 	}
 	v.Disabled = types.BoolValue(endpoint.Disabled)
 	if endpoint.Settings.PreloadLibraries != nil {
-		v.EnabledLibraries = endpoint.Settings.PreloadLibraries.EnabledLibraries
+		libs, d := types.ListValueFrom(ctx, types.StringType, endpoint.Settings.PreloadLibraries.EnabledLibraries)
+		diagnostics.Append(d...)
+		if diagnostics.HasError() {
+			return
+		}
+		v.EnabledLibraries = libs
 		v.EnabledLibrariesUseDefaults = types.BoolPointerValue(endpoint.Settings.PreloadLibraries.UseDefaults)
+	} else {
+		v.EnabledLibraries = types.ListNull(types.StringType)
+		v.EnabledLibrariesUseDefaults = types.BoolNull()
 	}
 	v.PasswordlessAccess = types.BoolValue(endpoint.PasswordlessAccess)
 	v.Host = types.StringValue(endpoint.Host)
 	hostPooler := endpoint.ID + "-pooler" + strings.TrimPrefix(endpoint.Host, endpoint.ID)
 	v.HostPooler = types.StringValue(hostPooler)
+}
+
+func (v neonEndpointResourceModel) pgSettings(ctx context.Context, diagnostics *diag.Diagnostics) *neon.PgSettingsData {
+	var pgSettingsValues map[string]string
+	if !v.PgSettings.IsNull() {
+		diagnostics.Append(v.PgSettings.ElementsAs(ctx, &pgSettingsValues, false)...)
+		if diagnostics.HasError() {
+			return nil
+		}
+	}
+	pgSettings := make(neon.PgSettingsData, len(pgSettingsValues))
+	for k, v := range pgSettingsValues {
+		pgSettings[k] = mustConvertStr(v)
+	}
+	return &pgSettings
+}
+
+func (v neonEndpointResourceModel) enabledLibraries(ctx context.Context, diagnostics *diag.Diagnostics) []string {
+	if v.EnabledLibraries.IsUnknown() {
+		return nil
+	}
+	var enabledLibraries []string
+	if !v.EnabledLibraries.IsNull() {
+		diagnostics.Append(v.EnabledLibraries.ElementsAs(ctx, &enabledLibraries, false)...)
+	}
+	return enabledLibraries
+}
+
+// mustConvertStr converts input string to any.
+// see example of possible values https://github.com/postgres/postgres/blob/master/src/backend/utils/misc/postgresql.conf.sample
+func mustConvertStr(s string) any {
+	if len(s) == 0 {
+		return s
+	}
+
+	var numberAlike = func(s string) bool {
+		var isDigit = func(v uint8) bool {
+			switch v {
+			case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+				return true
+			}
+			return false
+		}
+
+		var startsWithSign bool
+		switch s[0] {
+		case '+', '-':
+			startsWithSign = true
+		}
+
+		return ((startsWithSign && isDigit(s[1])) || isDigit(s[0])) && isDigit(s[len(s)-1])
+	}
+
+	v := strings.ToLower(strings.TrimSpace(s))
+	if numberAlike(v) {
+		if strings.Contains(v, ".") {
+			if n, err := strconv.ParseFloat(s, 64); err == nil {
+				return n
+			}
+		}
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return n
+		}
+	}
+
+	return s
 }
 
 func NewNeonEndpointResource() resource.Resource {
@@ -157,6 +236,7 @@ Alternatively, use the data source ` + "`neon_active_regions`.",
 			"pg_settings": schema.MapAttribute{
 				Description: "A raw representation of Postgres settings",
 				Optional:    true,
+				Computed:    true,
 				ElementType: types.StringType,
 			},
 			"disabled": schema.BoolAttribute{
@@ -171,6 +251,7 @@ Alternatively, use the data source ` + "`neon_active_regions`.",
 			"enabled_libraries": schema.ListAttribute{
 				Description: "Names of shared preload libraries to enable for the project.",
 				Optional:    true,
+				Computed:    true,
 				ElementType: types.StringType,
 			},
 			"enabled_libraries_use_defaults": schema.BoolAttribute{
@@ -346,20 +427,52 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 		cfg.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(state.SuspendTimeoutSeconds.ValueInt64()))
 	}
 
-	if len(state.PgSettings) > 0 {
-		var pgSettings = make(neon.PgSettingsData, len(state.PgSettings))
-		for k, v := range state.PgSettings {
-			pgSettings[k] = v
+	// TODO: removed once the API behaviour is cleared
+	if cfg.AutoscalingLimitMinCu == nil || cfg.AutoscalingLimitMaxCu == nil {
+		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+			r, err := r.client.GetProject(state.ProjectID.ValueString())
+			if err != nil {
+				return err
+			}
+			if r.Project.DefaultEndpointSettings != nil {
+				if cfg.AutoscalingLimitMinCu == nil {
+					cfg.AutoscalingLimitMinCu = r.Project.DefaultEndpointSettings.AutoscalingLimitMinCu
+				}
+				if cfg.AutoscalingLimitMaxCu == nil {
+					cfg.AutoscalingLimitMaxCu = r.Project.DefaultEndpointSettings.AutoscalingLimitMaxCu
+				}
+			}
+			return nil
+		}, ctx)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		cfg.Settings = &neon.EndpointSettingsData{PgSettings: &pgSettings}
 	}
 
-	if len(state.EnabledLibraries) > 0 {
+	if cfg.AutoscalingLimitMinCu == nil {
+		cfg.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(1))
+	}
+
+	if cfg.AutoscalingLimitMaxCu == nil {
+		cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(1))
+	}
+
+	if !state.PgSettings.IsNull() && !state.PgSettings.IsUnknown() {
+		cfg.Settings = &neon.EndpointSettingsData{PgSettings: state.pgSettings(ctx, &resp.Diagnostics)}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	if !state.EnabledLibraries.IsNull() && !state.EnabledLibraries.IsUnknown() {
 		if cfg.Settings == nil {
 			cfg.Settings = new(neon.EndpointSettingsData)
 		}
 		cfg.Settings.PreloadLibraries = &neon.PreloadLibraries{
-			EnabledLibraries: state.EnabledLibraries,
+			EnabledLibraries: state.enabledLibraries(ctx, &resp.Diagnostics),
+		}
+		if resp.Diagnostics.HasError() {
+			return
 		}
 	}
 	if !state.EnabledLibrariesUseDefaults.IsUnknown() && !state.EnabledLibrariesUseDefaults.IsNull() {
@@ -389,7 +502,7 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	state.inferAttr(endpoint)
+	state.inferAttr(ctx, endpoint, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -423,7 +536,7 @@ func (r *neonEndpointResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	state.inferAttr(endpoint)
+	state.inferAttr(ctx, endpoint, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -450,6 +563,10 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 		cfg.Name = plan.Name.ValueStringPointer()
 	}
 
+	// Note that the update config will contain only the known attributes
+	// It may result to a drift that follows update, because the Neon ctr. plane may reset the endpoint's configurations
+	// to the project's defaults when they are being changed from custom values to nil.
+
 	if !plan.Disabled.IsUnknown() && !prior.Disabled.Equal(plan.Disabled) {
 		cfg.Disabled = plan.Disabled.ValueBoolPointer()
 	}
@@ -458,13 +575,12 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 		cfg.PasswordlessAccess = plan.PasswordlessAccess.ValueBoolPointer()
 	}
 
-	// Update autoscaling limits if its new value is known and differs from the prev.
-	if !plan.AutoscalingLimitMinCU.IsNull() && !plan.AutoscalingLimitMinCU.IsUnknown() &&
+	// update the scaling limits only when they are specified
+	if !plan.AutoscalingLimitMinCU.IsUnknown() && !plan.AutoscalingLimitMinCU.IsNull() &&
 		!prior.AutoscalingLimitMinCU.Equal(plan.AutoscalingLimitMinCU) {
 		cfg.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(plan.AutoscalingLimitMinCU.ValueFloat64()))
 	}
-
-	if !plan.AutoscalingLimitMaxCU.IsNull() && !plan.AutoscalingLimitMaxCU.IsUnknown() &&
+	if !plan.AutoscalingLimitMaxCU.IsUnknown() && !plan.AutoscalingLimitMaxCU.IsNull() &&
 		!prior.AutoscalingLimitMaxCU.Equal(plan.AutoscalingLimitMaxCU) {
 		cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(plan.AutoscalingLimitMaxCU.ValueFloat64()))
 	}
@@ -477,41 +593,34 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 		cfg.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(plan.SuspendTimeoutSeconds.ValueInt64()))
 	}
 
-	if !prior.ComputeProvisioner.Equal(plan.ComputeProvisioner) {
+	if !plan.ComputeProvisioner.IsNull() && !plan.ComputeProvisioner.IsUnknown() &&
+		!prior.ComputeProvisioner.Equal(plan.ComputeProvisioner) {
 		cfg.Provisioner = pointer(neon.Provisioner(plan.ComputeProvisioner.ValueString()))
 	}
 
-	if !reflect.DeepEqual(prior.PgSettings, plan.PgSettings) {
-		pgSettings := make(neon.PgSettingsData, len(plan.PgSettings))
-		for k, v := range plan.PgSettings {
-			pgSettings[k] = v
+	if !plan.PgSettings.IsUnknown() && !prior.PgSettings.Equal(plan.PgSettings) {
+		cfg.Settings = &neon.EndpointSettingsData{PgSettings: plan.pgSettings(ctx, &resp.Diagnostics)}
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		cfg.Settings = &neon.EndpointSettingsData{PgSettings: &pgSettings}
 	}
 
-	slices.SortStableFunc(prior.EnabledLibraries, func(a, b string) int {
-		return strings.Compare(a, b)
-	})
-	slices.SortStableFunc(plan.EnabledLibraries, func(a, b string) int {
-		return strings.Compare(a, b)
-	})
-	if plan.EnabledLibraries != nil && !slices.Equal(prior.EnabledLibraries, plan.EnabledLibraries) {
+	if !plan.EnabledLibraries.IsUnknown() &&
+		!plan.EnabledLibraries.IsNull() &&
+		!prior.EnabledLibraries.Equal(plan.EnabledLibraries) {
 		if cfg.Settings == nil {
 			cfg.Settings = new(neon.EndpointSettingsData)
 		}
-		libs := plan.EnabledLibraries
-		// initialize the preload libraries as empty slice, so the request payload
-		// contains the value `[]` after serialization
-		if len(libs) == 0 {
-			libs = []string{}
-		}
 		cfg.Settings.PreloadLibraries = &neon.PreloadLibraries{
-			EnabledLibraries: libs,
+			EnabledLibraries: plan.enabledLibraries(ctx, &resp.Diagnostics),
+		}
+		if resp.Diagnostics.HasError() {
+			return
 		}
 	}
 
-	if !plan.EnabledLibrariesUseDefaults.IsNull() &&
-		!prior.EnabledLibrariesUseDefaults.Equal(plan.EnabledLibrariesUseDefaults) {
+	if !prior.EnabledLibrariesUseDefaults.Equal(plan.EnabledLibrariesUseDefaults) &&
+		!plan.EnabledLibrariesUseDefaults.IsUnknown() {
 		if cfg.Settings == nil {
 			cfg.Settings = new(neon.EndpointSettingsData)
 		}
@@ -519,6 +628,17 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 			cfg.Settings.PreloadLibraries = new(neon.PreloadLibraries)
 		}
 		cfg.Settings.PreloadLibraries.UseDefaults = plan.EnabledLibrariesUseDefaults.ValueBoolPointer()
+
+		// As of 2026-10-16, the Neon team is aware of the misbehaviour of the ctr. plane and API:
+		// When use `UseDefaults` is updated to `true` after the `EnabledLibraries` were configured,
+		// the latter are voided. The condition below is meant as a workaround until the API logic is fixed.
+		if !plan.EnabledLibraries.IsUnknown() &&
+			!plan.EnabledLibraries.IsNull() {
+			cfg.Settings.PreloadLibraries.EnabledLibraries = plan.enabledLibraries(ctx, &resp.Diagnostics)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
 	}
 
 	var endpoint neon.Endpoint
@@ -539,7 +659,7 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	plan.inferAttr(endpoint)
+	plan.inferAttr(ctx, endpoint, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
