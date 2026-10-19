@@ -49,7 +49,6 @@ resource "neon_endpoint" "example" {
 - `enabled_libraries_use_defaults` (Boolean) When true, the project's preload libraries include the platform default set in addition to any libraries listed in `enabled_libraries`.
 - `name` (String) Name of the compute endpoint.
 - `passwordless_access` (Boolean) When true, the endpoint allows passwordless access.
-- `pg_settings` (Map of String) A raw representation of Postgres settings
 - `region_id` (String) Cloud region where the resource's Postgres compute and storage reside.
 Find the list here: https://neon.com/docs/introduction/regions.
 Alternatively, use the data source `neon_active_regions`.
