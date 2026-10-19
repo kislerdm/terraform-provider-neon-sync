@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -208,22 +207,6 @@ func TestEndpoint(t *testing.T) {
 							verify,
 						),
 					},
-					// update pg settings
-					// NOTE: unhappy path is used because a read_only endpoint may not mutate pg_settings(?)
-					{
-						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
-					
-					resource "neon_endpoint" "this" {
-						project_id  = neon_project.this.id
-						branch_id   = neon_project.this.default_branch_id
-						region_id   = neon_project.this.region_id
-						type        = "read_only"
-						pg_settings = {"jit": "off"}
-					}
-					`, projectName),
-						ExpectError: regexp.MustCompile(`400`),
-					},
-
 					// update enabled_libraries
 					{
 						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
@@ -287,6 +270,47 @@ func TestEndpoint(t *testing.T) {
 								"uuid-ossp"),
 							resource.TestCheckResourceAttr("neon_endpoint.this",
 								"enabled_libraries_use_defaults", "true"),
+							verify,
+						),
+					},
+				},
+			},
+		)
+	})
+
+	t.Run("shall create a read-write endpoint", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {name = %q}
+					resource "neon_branch" "this" {project_id = neon_project.this.id}
+					resource "neon_endpoint" "this" {
+						project_id = neon_project.this.id
+						branch_id  = neon_branch.this.id
+						region_id  = neon_project.this.region_id
+						type       = "read_write"
+					}
+					`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_endpoint.this", "type", "read_write"),
+							resource.TestCheckResourceAttrSet("neon_endpoint.this", "host"),
+							resource.TestCheckResourceAttrSet("neon_endpoint.this", "host_pooler"),
+							func(state *terraform.State) error {
+								r, ok := state.RootModule().Resources["neon_endpoint.this"]
+								assert.Truef(t, ok, "no endpoint resource found")
+
+								host, ok := r.Primary.Attributes["host"]
+								assert.Truef(t, ok, `"host" attribute not found`)
+
+								hostPooler, ok := r.Primary.Attributes["host_pooler"]
+								assert.Truef(t, ok, `"host_pooler" attribute not found`)
+
+								assert.Equal(t, host, strings.ReplaceAll(hostPooler, "-pooler", ""))
+								return nil
+							},
 							verify,
 						),
 					},

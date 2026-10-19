@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,7 +40,6 @@ type neonEndpointResourceModel struct {
 	AutoscalingLimitMaxCU       types.Float64 `tfsdk:"autoscaling_limit_max_cu"`
 	SuspendTimeoutSeconds       types.Int64   `tfsdk:"suspend_timeout_seconds"`
 	ComputeProvisioner          types.String  `tfsdk:"compute_provisioner"`
-	PgSettings                  types.Map     `tfsdk:"pg_settings"`
 	Disabled                    types.Bool    `tfsdk:"disabled"`
 	EnabledLibraries            types.List    `tfsdk:"enabled_libraries"`
 	EnabledLibrariesUseDefaults types.Bool    `tfsdk:"enabled_libraries_use_defaults"`
@@ -61,17 +59,6 @@ func (v *neonEndpointResourceModel) inferAttr(ctx context.Context, endpoint neon
 	v.AutoscalingLimitMaxCU = types.Float64Value(float64(endpoint.AutoscalingLimitMaxCu))
 	v.SuspendTimeoutSeconds = types.Int64Value(int64(endpoint.SuspendTimeoutSeconds))
 	v.ComputeProvisioner = types.StringValue(string(endpoint.Provisioner))
-	if endpoint.Settings.PgSettings != nil {
-		tmp := make(map[string]string, len(*endpoint.Settings.PgSettings))
-		for k, val := range *endpoint.Settings.PgSettings {
-			tmp[k] = fmt.Sprintf("%v", val)
-		}
-		var settingsDiags diag.Diagnostics
-		v.PgSettings, settingsDiags = types.MapValueFrom(ctx, types.StringType, tmp)
-		diagnostics.Append(settingsDiags...)
-	} else {
-		v.PgSettings = types.MapNull(types.StringType)
-	}
 	v.Disabled = types.BoolValue(endpoint.Disabled)
 	if endpoint.Settings.PreloadLibraries != nil {
 		libs, d := types.ListValueFrom(ctx, types.StringType, endpoint.Settings.PreloadLibraries.EnabledLibraries)
@@ -89,21 +76,6 @@ func (v *neonEndpointResourceModel) inferAttr(ctx context.Context, endpoint neon
 	v.Host = types.StringValue(endpoint.Host)
 	hostPooler := endpoint.ID + "-pooler" + strings.TrimPrefix(endpoint.Host, endpoint.ID)
 	v.HostPooler = types.StringValue(hostPooler)
-}
-
-func (v neonEndpointResourceModel) pgSettings(ctx context.Context, diagnostics *diag.Diagnostics) *neon.PgSettingsData {
-	var pgSettingsValues map[string]string
-	if !v.PgSettings.IsNull() {
-		diagnostics.Append(v.PgSettings.ElementsAs(ctx, &pgSettingsValues, false)...)
-		if diagnostics.HasError() {
-			return nil
-		}
-	}
-	pgSettings := make(neon.PgSettingsData, len(pgSettingsValues))
-	for k, v := range pgSettingsValues {
-		pgSettings[k] = mustConvertStr(v)
-	}
-	return &pgSettings
 }
 
 func (v neonEndpointResourceModel) enabledLibraries(ctx context.Context, diagnostics *diag.Diagnostics) []string {
@@ -232,12 +204,6 @@ Alternatively, use the data source ` + "`neon_active_regions`.",
 				Computed:    true,
 				Default:     stringdefault.StaticString("k8s-neonvm"),
 				Validators:  []validator.String{validateComputeProvisioner},
-			},
-			"pg_settings": schema.MapAttribute{
-				Description: "A raw representation of Postgres settings",
-				Optional:    true,
-				Computed:    true,
-				ElementType: types.StringType,
 			},
 			"disabled": schema.BoolAttribute{
 				Description: `Whether to restrict connections to the compute endpoint.
@@ -457,13 +423,6 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 		cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(1))
 	}
 
-	if !state.PgSettings.IsNull() && !state.PgSettings.IsUnknown() {
-		cfg.Settings = &neon.EndpointSettingsData{PgSettings: state.pgSettings(ctx, &resp.Diagnostics)}
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
 	if !state.EnabledLibraries.IsNull() && !state.EnabledLibraries.IsUnknown() {
 		if cfg.Settings == nil {
 			cfg.Settings = new(neon.EndpointSettingsData)
@@ -596,13 +555,6 @@ func (r *neonEndpointResource) Update(ctx context.Context, req resource.UpdateRe
 	if !plan.ComputeProvisioner.IsNull() && !plan.ComputeProvisioner.IsUnknown() &&
 		!prior.ComputeProvisioner.Equal(plan.ComputeProvisioner) {
 		cfg.Provisioner = pointer(neon.Provisioner(plan.ComputeProvisioner.ValueString()))
-	}
-
-	if !plan.PgSettings.IsUnknown() && !prior.PgSettings.Equal(plan.PgSettings) {
-		cfg.Settings = &neon.EndpointSettingsData{PgSettings: plan.pgSettings(ctx, &resp.Diagnostics)}
-		if resp.Diagnostics.HasError() {
-			return
-		}
 	}
 
 	if !plan.EnabledLibraries.IsUnknown() &&
