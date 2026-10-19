@@ -65,27 +65,44 @@ func TestEndpoint(t *testing.T) {
 		}
 		if resp.Endpoint.Settings.PreloadLibraries != nil {
 			cnt, ok := r.Primary.Attributes["enabled_libraries.#"]
-			assert.Truef(t, ok, "unexpected size of enabled_libraries")
-			assert.EqualValuesf(t,
+			if !ok {
+				if len(resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries) > 0 {
+					return fmt.Errorf("unexpected size of enabled_libraries")
+				}
+				cnt = "0"
+			}
+			if !assert.EqualValuesf(t,
 				fmt.Sprintf("%d", len(resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries)), cnt,
-				"unexpected size of enabled_libraries")
+				"unexpected size of enabled_libraries") {
+				return fmt.Errorf("unexpected size of enabled_libraries")
+			}
 
 			if len(resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries) > 0 {
 				for i, lib := range resp.Endpoint.Settings.PreloadLibraries.EnabledLibraries {
-					assert.Equalf(t, lib, r.Primary.Attributes[fmt.Sprintf("enabled_libraries.%d", i)],
-						"unexpected value for enabled_libraries[%d]", i)
+					if !assert.Equalf(t, lib, r.Primary.Attributes[fmt.Sprintf("enabled_libraries.%d", i)],
+						"unexpected value for enabled_libraries[%d]", i) {
+						return fmt.Errorf("unexpected value for enabled_libraries[%d]", i)
+					}
 				}
 			}
 
 			actualRaw, ok := r.Primary.Attributes["enabled_libraries_use_defaults"]
 			if resp.Endpoint.Settings.PreloadLibraries.UseDefaults == nil {
-				assert.Truef(t, !ok || actualRaw == "", "unexpected enabled_libraries_use_defaults value")
+				if !assert.Truef(t, !ok || actualRaw == "", "unexpected enabled_libraries_use_defaults value") {
+					return fmt.Errorf("unexpected enabled_libraries_use_defaults value")
+				}
 			} else {
-				assert.Truef(t, ok, "no enabled_libraries_use_defaults attribute found")
+				if !assert.Truef(t, ok, "no enabled_libraries_use_defaults attribute found") {
+					return fmt.Errorf("no enabled_libraries_use_defaults attribute found")
+				}
 				actual, err := strconv.ParseBool(actualRaw)
-				assert.NoErrorf(t, err, "could not parse enabled_libraries_use_defaults")
-				assert.EqualValuesf(t, *resp.Endpoint.Settings.PreloadLibraries.UseDefaults, actual,
-					"unexpected enabled_libraries_use_defaults")
+				if !assert.NoErrorf(t, err, "could not parse enabled_libraries_use_defaults") {
+					return fmt.Errorf("could not parse enabled_libraries_use_defaults")
+				}
+				if !assert.EqualValuesf(t, *resp.Endpoint.Settings.PreloadLibraries.UseDefaults, actual,
+					"unexpected enabled_libraries_use_defaults") {
+					return fmt.Errorf("unexpected enabled_libraries_use_defaults")
+				}
 			}
 
 		}
@@ -317,5 +334,222 @@ func TestEndpoint(t *testing.T) {
 				},
 			},
 		)
+	})
+
+	var endpointConfig = func(projectName, customConfig string) string {
+		return fmt.Sprintf(`resource "neon_project" "this" {
+		region_id = "aws-us-east-2"
+		name = %q
+}
+	resource "neon_endpoint" "this" {
+		project_id = neon_project.this.id
+		branch_id  = neon_project.this.default_branch_id
+		region_id  = neon_project.this.region_id
+		type       = "read_only"
+		%s
+	}
+	`, projectName, customConfig)
+	}
+
+	t.Run("shall create w/ custom autoscaling limits", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `
+		autoscaling_limit_min_cu = 0.25
+		autoscaling_limit_max_cu = 0.5`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_min_cu", "0.25"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_max_cu", "0.5"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom suspend timeout", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `suspend_timeout_seconds = 120`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "suspend_timeout_seconds", "120"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom name", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `name = "custom-endpoint"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "name", "custom-endpoint"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom compute_provisioner", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `compute_provisioner = "k8s-neonvm"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "compute_provisioner", "k8s-neonvm"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom disabled", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `disabled = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "disabled", "true"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom enabled_libraries", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `enabled_libraries = ["uuid-ossp"]`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#", "1"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0", "uuid-ossp"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom enabled_libraries_use_defaults", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `enabled_libraries_use_defaults = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries_use_defaults", "true"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom passwordless access", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `passwordless_access = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "passwordless_access", "true"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom autoscaling and suspend timeout", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `
+		autoscaling_limit_min_cu = 0.25
+		autoscaling_limit_max_cu = 0.5
+		suspend_timeout_seconds  = 120`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_min_cu", "0.25"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_max_cu", "0.5"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "suspend_timeout_seconds", "120"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom name and compute provisioner", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `
+		name                = "custom-endpoint"
+		compute_provisioner = "k8s-neonvm"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "name", "custom-endpoint"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "compute_provisioner", "k8s-neonvm"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ custom libraries and defaults", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `
+		enabled_libraries              = ["uuid-ossp"]
+		enabled_libraries_use_defaults = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#", "1"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0", "uuid-ossp"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries_use_defaults", "true"),
+					verify,
+				),
+			}},
+		})
+	})
+
+	t.Run("shall create w/ all custom configs", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: endpointConfig(projectName, `
+		name                         = "custom-endpoint"
+		autoscaling_limit_min_cu    = 0.25
+		autoscaling_limit_max_cu    = 0.5
+		suspend_timeout_seconds     = 120
+		compute_provisioner          = "k8s-neonvm"
+		disabled                     = true
+		enabled_libraries            = ["uuid-ossp"]
+		enabled_libraries_use_defaults = true
+		passwordless_access          = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("neon_endpoint.this", "name", "custom-endpoint"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_min_cu", "0.25"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "autoscaling_limit_max_cu", "0.5"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "suspend_timeout_seconds", "120"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "compute_provisioner", "k8s-neonvm"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "disabled", "true"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.#", "1"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries.0", "uuid-ossp"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "enabled_libraries_use_defaults", "true"),
+					resource.TestCheckResourceAttr("neon_endpoint.this", "passwordless_access", "true"),
+					verify,
+				),
+			}},
+		})
 	})
 }

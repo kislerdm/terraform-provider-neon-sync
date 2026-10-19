@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
@@ -393,36 +394,10 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 		cfg.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(state.SuspendTimeoutSeconds.ValueInt64()))
 	}
 
-	// TODO: removed once the API behaviour is cleared
-	if cfg.AutoscalingLimitMinCu == nil || cfg.AutoscalingLimitMaxCu == nil {
-		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
-			r, err := r.client.GetProject(state.ProjectID.ValueString())
-			if err != nil {
-				return err
-			}
-			if r.Project.DefaultEndpointSettings != nil {
-				if cfg.AutoscalingLimitMinCu == nil {
-					cfg.AutoscalingLimitMinCu = r.Project.DefaultEndpointSettings.AutoscalingLimitMinCu
-				}
-				if cfg.AutoscalingLimitMaxCu == nil {
-					cfg.AutoscalingLimitMaxCu = r.Project.DefaultEndpointSettings.AutoscalingLimitMaxCu
-				}
-			}
-			return nil
-		}, ctx)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	if cfg.AutoscalingLimitMinCu == nil {
-		cfg.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(1))
-	}
-
-	if cfg.AutoscalingLimitMaxCu == nil {
-		cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(1))
-	}
-
+	// As of 2026-10-16, the Neon team is aware of the misbehaviour of the ctr. plane and API:
+	// When use `UseDefaults` and/or `EnabledLibraries` are configured, the creation fails.
+	// The implemented workaround: update the state after creation.
+	var update bool
 	if !state.EnabledLibraries.IsNull() && !state.EnabledLibraries.IsUnknown() {
 		if cfg.Settings == nil {
 			cfg.Settings = new(neon.EndpointSettingsData)
@@ -433,6 +408,7 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 		if resp.Diagnostics.HasError() {
 			return
 		}
+		update = true
 	}
 	if !state.EnabledLibrariesUseDefaults.IsUnknown() && !state.EnabledLibrariesUseDefaults.IsNull() {
 		if cfg.Settings == nil {
@@ -442,6 +418,12 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 			cfg.Settings.PreloadLibraries = new(neon.PreloadLibraries)
 		}
 		cfg.Settings.PreloadLibraries.UseDefaults = state.EnabledLibrariesUseDefaults.ValueBoolPointer()
+		update = true
+	}
+
+	// TODO: remove once Neon API is fixed
+	if update {
+		cfg.Settings = nil
 	}
 
 	var endpoint neon.Endpoint
@@ -463,6 +445,25 @@ func (r *neonEndpointResource) Create(ctx context.Context, req resource.CreateRe
 
 	state.inferAttr(ctx, endpoint, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// TODO: remove once Neon API is fixed
+	if update {
+		plan := req.Plan
+		prior := tfsdk.State{
+			Raw:    resp.State.Raw,
+			Schema: req.Config.Schema,
+		}
+		updateResp := resource.UpdateResponse{State: prior}
+		r.Update(ctx, resource.UpdateRequest{Plan: plan, State: prior}, &updateResp)
+		resp.Diagnostics.Append(updateResp.Diagnostics...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.State = updateResp.State
+	}
 }
 
 func (r *neonEndpointResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
