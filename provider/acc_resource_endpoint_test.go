@@ -24,7 +24,7 @@ func TestEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	projectNamePrefix := "roleRecreation"
+	projectNamePrefix := "endpoint"
 
 	t.Cleanup(func() {
 		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
