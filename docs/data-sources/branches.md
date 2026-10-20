@@ -1,12 +1,12 @@
 ---
 page_title: "neon_branches Data Source - terraform-provider-neon"
 description: |-
-  Fetch project branches from one API response. Additional pages are not fetched.
+  Fetch Project Branches.
 ---
 
 # neon_branches (Data Source)
 
-Fetch project branches from one API response. Additional pages are not fetched.
+Fetch Project Branches.
 The `branches` collection is read-only; its nested fields cannot be configured as filters.
 
 ## Example Usage
