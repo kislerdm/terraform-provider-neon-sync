@@ -40,7 +40,7 @@ func (d *neonBranchesDataSource) Metadata(_ context.Context, _ datasource.Metada
 
 func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Fetch project branches from one API response. Additional pages are not fetched.",
+		Description: "Fetch Project Branches.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
