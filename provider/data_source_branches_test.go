@@ -191,8 +191,11 @@ func TestBranchesDataSource(t *testing.T) {
 }`,
 				`{}`,
 			},
-			check: resource.TestCheckResourceAttr(
-				branchesAddress, "branches.#", "0",
+			check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.#", "0",
+				),
+				resource.TestCheckOutput("branch_count", "0"),
 			),
 		},
 	} {
@@ -270,6 +273,10 @@ func branchesDataSourceConfig(projectID string) string {
 	return fmt.Sprintf(`
 data "neon_branches" "this" {
   project_id = %q
+}
+
+output "branch_count" {
+  value = length(data.neon_branches.this.branches)
 }
 `, projectID)
 }

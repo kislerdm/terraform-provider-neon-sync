@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -18,9 +17,9 @@ type neonBranchesDataSource struct {
 }
 
 type neonBranchesDataSourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	ProjectID types.String `tfsdk:"project_id"`
-	Branches  types.List   `tfsdk:"branches"`
+	ID        types.String  `tfsdk:"id"`
+	ProjectID types.String  `tfsdk:"project_id"`
+	Branches  []branchModel `tfsdk:"branches"`
 }
 
 type branchModel struct {
@@ -146,21 +145,7 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		})
 	}
 
-	branchList, diags := types.ListValueFrom(ctx, types.ObjectType{
-		AttrTypes: map[string]attr.Type{
-			"id":           types.StringType,
-			"name":         types.StringType,
-			"parent_id":    types.StringType,
-			"logical_size": types.Int64Type,
-			"primary":      types.BoolType,
-		},
-	}, branches)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	data.Branches = branchList
+	data.Branches = branches
 	data.ID = types.StringValue(data.ProjectID.ValueString() + "/branches")
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
