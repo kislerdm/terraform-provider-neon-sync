@@ -8,6 +8,7 @@ description: |-
 
 Fetch Project Branches.
 The `branches` collection is read-only; its nested fields cannot be configured as filters.
+`primary` is deprecated; use `default` instead.
 
 ## Example Usage
 
@@ -43,6 +44,8 @@ Optional:
 
 Read-Only:
 
+- `default` (Boolean) Default branch flag.
 - `id` (String) Branch ID.
 - `logical_size` (Number) Branch logical size in bytes. Zero when the API omits it.
 - `primary` (Boolean, Deprecated) Primary branch flag.
+- `protected` (Boolean) Protected branch flag.
