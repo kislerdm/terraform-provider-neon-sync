@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"reflect"
 	"regexp"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -79,12 +83,7 @@ const branchesTwoResponse = `{
       "written_data_bytes": 0,
       "data_transfer_bytes": 0
     }
-  ],
-  "pagination": {
-    "next": "next-page",
-    "sort_by": "updated_at",
-    "sort_order": "desc"
-  }
+  ]
 }`
 
 func TestBranchesDataSource(t *testing.T) {
@@ -257,6 +256,213 @@ func TestBranchesDataSource(t *testing.T) {
 	}
 }
 
+func TestBranchesDataSourcePagination(t *testing.T) {
+	t.Parallel()
+	firstPage := strings.TrimSuffix(branchesTwoResponse, "\n}") + `,
+  "pagination": {
+    "next": "next+page/with=cursor&value",
+    "sort_by": "updated_at",
+    "sort_order": "desc"
+  }
+}`
+	lastPage := strings.NewReplacer(
+		"br-first-123", "br-third-789",
+		`"name": "main"`, `"name": "third"`,
+		`"primary": true`, `"primary": false`,
+		`"default": true`, `"default": false`,
+	).Replace(branchesOneResponse)
+	middlePage := strings.TrimSuffix(lastPage, "\n}") + `,
+  "pagination": {
+    "next": "last-page"
+  }
+}`
+	nextQuery := url.Values{
+		"cursor":     {"next+page/with=cursor&value"},
+		"sort_by":    {"updated_at"},
+		"sort_order": {"desc"},
+	}
+	lastQuery := url.Values{
+		"cursor":     {"last-page"},
+		"sort_by":    {"updated_at"},
+		"sort_order": {"desc"},
+	}
+	for _, tt := range []struct {
+		name      string
+		pages     []branchesPage
+		wantError string
+	}{
+		{
+			name: "three pages retain order and sorting",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusOK,
+					body:   middlePage,
+				},
+				{
+					query:  lastQuery,
+					status: http.StatusOK,
+					body: `{
+  "branches": []
+}`,
+				},
+			},
+		},
+		{
+			name: "later page retry adds no duplicate branches",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusTooManyRequests,
+					body: `{
+  "code": "RATE_LIMITED",
+  "message": "retry this page"
+}`,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusOK,
+					body:   lastPage,
+				},
+			},
+		},
+		{
+			name: "later page failure rejects partial results",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusForbidden,
+					body: `{
+  "code": "FORBIDDEN",
+  "message": "page access denied"
+}`,
+				},
+			},
+			wantError: "[HTTP Code: 403][Error Code: FORBIDDEN] page access denied",
+		},
+		{
+			name: "null pagination ends traversal",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusOK,
+					body: strings.TrimSuffix(lastPage, "\n}") + `,
+  "pagination": null
+}`,
+				},
+			},
+		},
+		{
+			name: "absent next cursor ends traversal",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusOK,
+					body: strings.TrimSuffix(lastPage, "\n}") + `,
+  "pagination": {}
+}`,
+				},
+			},
+		},
+		{
+			name: "empty next cursor ends traversal",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body:   firstPage,
+				},
+				{
+					query:  nextQuery,
+					status: http.StatusOK,
+					body: strings.TrimSuffix(lastPage, "\n}") + `,
+  "pagination": {
+    "next": ""
+  }
+}`,
+				},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := &branchesPaginationHTTPFixture{
+				t:     t,
+				pages: tt.pages,
+			}
+			client, err := neon.NewClient(neon.Config{
+				Key:        "test",
+				HTTPClient: fixture,
+			})
+			require.NoError(t, err)
+			step := resource.TestStep{
+				Config: branchesDataSourceConfig("cool-moon-42"),
+			}
+			if tt.wantError != "" {
+				step.ExpectError = regexp.MustCompile(regexp.QuoteMeta(tt.wantError))
+			} else {
+				step.Check = resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(
+						branchesAddress, "id", "cool-moon-42",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "project_id", "cool-moon-42",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.#", "3",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.0.id", "br-first-123",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.1.id", "br-second-456",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.id", "br-third-789",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.name", "third",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.logical_size", "1048577",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.primary", "false",
+					),
+					resource.TestCheckOutput("branch_count", "3"),
+				)
+			}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: newUnitTestProviderFactories(&providerAdapter{sdk: client}),
+				Steps:                    []resource.TestStep{step},
+			})
+			fixture.mu.Lock()
+			requests := fixture.requests
+			fixture.mu.Unlock()
+			require.Positive(t, requests)
+			require.Zero(t, requests%len(tt.pages), "each read must finish its expected page sequence")
+		})
+	}
+}
+
 func TestBranchesDataSourceConfiguredOutputs(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -306,6 +512,40 @@ output "branch_count" {
   value = length(data.neon_branches.this.branches)
 }
 `, projectID)
+}
+
+type branchesPage struct {
+	query  url.Values
+	status int
+	body   string
+}
+
+type branchesPaginationHTTPFixture struct {
+	t        *testing.T
+	pages    []branchesPage
+	mu       sync.Mutex
+	requests int
+}
+
+func (f *branchesPaginationHTTPFixture) Do(req *http.Request) (*http.Response, error) {
+	f.t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	page := f.pages[f.requests%len(f.pages)]
+	f.requests++
+	query := page.query
+	if query == nil {
+		query = url.Values{}
+	}
+	if !reflect.DeepEqual(query, req.URL.Query()) {
+		return nil, fmt.Errorf("unexpected branches query: got %v, want %v", req.URL.Query(), query)
+	}
+	return branchDataSourceHTTPFixture{
+		t:      f.t,
+		path:   "/api/v2/projects/cool-moon-42/branches",
+		status: page.status,
+		body:   page.body,
+	}.Do(req)
 }
 
 type branchesHTTPFixture struct {
