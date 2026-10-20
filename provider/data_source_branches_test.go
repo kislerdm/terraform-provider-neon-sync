@@ -1,11 +1,13 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/require"
@@ -88,12 +90,13 @@ const branchesTwoResponse = `{
 func TestBranchesDataSource(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		name      string
-		projectID string
-		status    int
-		bodies    []string
-		check     resource.TestCheckFunc
-		wantError string
+		name                    string
+		projectID               string
+		status                  int
+		bodies                  []string
+		check                   resource.TestCheckFunc
+		wantError               string
+		checkPrimaryDeprecation bool
 	}{
 		{
 			name:      "missing project",
@@ -106,10 +109,11 @@ func TestBranchesDataSource(t *testing.T) {
 			wantError: "[HTTP Code: 404][Error Code: NOT_FOUND] project not found",
 		},
 		{
-			name:      "one branch",
-			projectID: "cool-moon-42",
-			status:    http.StatusOK,
-			bodies:    []string{branchesOneResponse},
+			name:                    "one branch",
+			projectID:               "cool-moon-42",
+			status:                  http.StatusOK,
+			bodies:                  []string{branchesOneResponse},
+			checkPrimaryDeprecation: true,
 			check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.#", "1",
@@ -204,6 +208,29 @@ func TestBranchesDataSource(t *testing.T) {
 				t.Run(fmt.Sprintf("response %d", i+1), func(t *testing.T) {
 					client := newBranchesTestClient(t, tt.projectID, tt.status, body)
 					factories := newUnitTestProviderFactories(&providerAdapter{sdk: client})
+					if tt.checkPrimaryDeprecation {
+						server, err := factories["neon"]()
+						require.NoError(t, err)
+						response, err := server.GetProviderSchema(
+							context.Background(),
+							&tfprotov6.GetProviderSchemaRequest{},
+						)
+						require.NoError(t, err)
+						require.Empty(t, response.Diagnostics)
+						var primary *tfprotov6.SchemaAttribute
+						for _, attribute := range response.DataSourceSchemas["neon_branches"].Block.Attributes {
+							if attribute.Name != "branches" {
+								continue
+							}
+							for _, field := range attribute.NestedType.Attributes {
+								if field.Name == "primary" {
+									primary = field
+								}
+							}
+						}
+						require.NotNil(t, primary)
+						require.True(t, primary.Deprecated)
+					}
 					step := resource.TestStep{
 						Config: branchesDataSourceConfig(tt.projectID),
 					}
