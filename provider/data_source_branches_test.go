@@ -29,7 +29,7 @@ const branchesOneResponse = `{
       "logical_size": 1048577,
       "primary": true,
       "default": true,
-      "protected": false,
+      "protected": true,
       "current_state": "ready",
       "state_changed_at": "2026-01-01T00:00:00Z",
       "creation_source": "console",
@@ -132,6 +132,12 @@ func TestBranchesDataSource(t *testing.T) {
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.0.primary", "true",
 				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.default", "true",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.protected", "true",
+				),
 			),
 		},
 		{
@@ -165,6 +171,12 @@ func TestBranchesDataSource(t *testing.T) {
 					branchesAddress, "branches.0.primary", "false",
 				),
 				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.default", "false",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.protected", "false",
+				),
+				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.1.id", "br-second-456",
 				),
 				resource.TestCheckResourceAttr(
@@ -178,6 +190,12 @@ func TestBranchesDataSource(t *testing.T) {
 				),
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.1.primary", "false",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.1.default", "true",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.1.protected", "false",
 				),
 			),
 		},
@@ -446,6 +464,12 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 					),
 					resource.TestCheckResourceAttr(
 						branchesAddress, "branches.2.primary", "false",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.default", "false",
+					),
+					resource.TestCheckResourceAttr(
+						branchesAddress, "branches.2.protected", "true",
 					),
 					resource.TestCheckOutput("branch_count", "3"),
 				)

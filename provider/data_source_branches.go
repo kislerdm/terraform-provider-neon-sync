@@ -29,6 +29,8 @@ type branchModel struct {
 	ParentID    types.String `tfsdk:"parent_id"`
 	LogicalSize types.Int64  `tfsdk:"logical_size"`
 	Primary     types.Bool   `tfsdk:"primary"`
+	Default     types.Bool   `tfsdk:"default"`
+	Protected   types.Bool   `tfsdk:"protected"`
 }
 
 func NewBranchesDataSource() datasource.DataSource {
@@ -77,7 +79,15 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 						"primary": schema.BoolAttribute{
 							Computed:           true,
 							Description:        "Primary branch flag.",
-							DeprecationMessage: "This field is deprecated by the Neon API.",
+							DeprecationMessage: "Use default instead.",
+						},
+						"default": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Default branch flag.",
+						},
+						"protected": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Protected branch flag.",
 						},
 					},
 				},
@@ -154,6 +164,8 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 				ParentID:    types.StringValue(parentID),
 				LogicalSize: types.Int64Value(logicalSize),
 				Primary:     types.BoolValue(primary),
+				Default:     types.BoolValue(branch.Default),
+				Protected:   types.BoolValue(branch.Protected),
 			})
 		}
 
