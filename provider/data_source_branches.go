@@ -43,8 +43,8 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 		Description: "Fetch Project Branches.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "Branch-list scope in the form `<project_id>/branches`.",
+				Computed:    true,
+				Description: "Project ID.",
 			},
 			"project_id": schema.StringAttribute{
 				Required:    true,
@@ -147,6 +147,6 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 
 	data.Branches = branches
-	data.ID = types.StringValue(data.ProjectID.ValueString() + "/branches")
+	data.ID = data.ProjectID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

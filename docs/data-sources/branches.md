@@ -31,7 +31,7 @@ output "branch_names" {
 ### Read-Only
 
 - `branches` (Attributes List) Project branches in API response order. (see [below for nested schema](#nestedatt--branches))
-- `id` (String) Branch-list scope in the form `<project_id>/branches`.
+- `id` (String) Project ID.
 
 <a id="nestedatt--branches"></a>
 ### Nested Schema for `branches`
