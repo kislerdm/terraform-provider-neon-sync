@@ -242,7 +242,7 @@ func TestBranchesDataSource(t *testing.T) {
 								branchesAddress, "project_id", "cool-moon-42",
 							),
 							resource.TestCheckResourceAttr(
-								branchesAddress, "id", "cool-moon-42/branches",
+								branchesAddress, "id", "cool-moon-42",
 							),
 							tt.check,
 						)
