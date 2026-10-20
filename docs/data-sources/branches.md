@@ -45,4 +45,4 @@ Read-Only:
 
 - `id` (String) Branch ID.
 - `logical_size` (Number) Branch logical size in bytes. Zero when the API omits it.
-- `primary` (Boolean) Legacy primary branch flag. False when the API omits it.
+- `primary` (Boolean, Deprecated) Primary branch flag.

@@ -74,8 +74,9 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 							Description: "Branch logical size in bytes. Zero when the API omits it.",
 						},
 						"primary": schema.BoolAttribute{
-							Computed:    true,
-							Description: "Legacy primary branch flag. False when the API omits it.",
+							Computed:           true,
+							Description:        "Primary branch flag.",
+							DeprecationMessage: "This field is deprecated by the Neon API.",
 						},
 					},
 				},
