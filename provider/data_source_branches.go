@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -113,40 +114,73 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 
-	var result neon.ListProjectBranchesRespObj
-	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
-		var err error
-		result, err = d.client.ListProjectBranches(data.ProjectID.ValueString(), nil, nil, nil, nil, nil, nil)
-		return err
-	}, ctx)...)
-	if resp.Diagnostics.HasError() {
-		return
+	data.Branches = make([]branchModel, 0)
+	var cursor *string
+	var sortBy *neon.ListProjectBranchesSortBy
+	var sortOrder *neon.SortOrderParam
+	for {
+		if err := ctx.Err(); err != nil {
+			resp.Diagnostics.Append(frameworkDiagnostics(err)...)
+			return
+		}
+		var result neon.ListProjectBranchesRespObj
+		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+			var err error
+			result, err = d.client.ListProjectBranches(
+				data.ProjectID.ValueString(), nil, sortBy, cursor, sortOrder, nil, nil,
+			)
+			return err
+		}, ctx)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, branch := range result.Branches {
+			parentID := ""
+			if branch.ParentID != nil {
+				parentID = *branch.ParentID
+			}
+			logicalSize := int64(0)
+			if branch.LogicalSize != nil {
+				logicalSize = *branch.LogicalSize
+			}
+			primary := false
+			if branch.Primary != nil {
+				primary = *branch.Primary
+			}
+			data.Branches = append(data.Branches, branchModel{
+				ID:          types.StringValue(branch.ID),
+				Name:        types.StringValue(branch.Name),
+				ParentID:    types.StringValue(parentID),
+				LogicalSize: types.Int64Value(logicalSize),
+				Primary:     types.BoolValue(primary),
+			})
+		}
+
+		pagination := result.Pagination
+		if pagination == nil || pagination.Next == nil || *pagination.Next == "" {
+			break
+		}
+		if pagination.SortBy != nil {
+			value, err := neon.NewListProjectBranchesSortBy(*pagination.SortBy)
+			if err != nil {
+				resp.Diagnostics.Append(frameworkDiagnostics(err)...)
+				return
+			}
+			sortBy = &value
+		}
+		if pagination.SortOrder != nil {
+			value, err := neon.NewSortOrderParam(*pagination.SortOrder)
+			if err != nil {
+				resp.Diagnostics.Append(frameworkDiagnostics(err)...)
+				return
+			}
+			sortOrder = &value
+		}
+		next := url.QueryEscape(*pagination.Next)
+		cursor = &next
 	}
 
-	branches := make([]branchModel, 0, len(result.Branches))
-	for _, branch := range result.Branches {
-		parentID := ""
-		if branch.ParentID != nil {
-			parentID = *branch.ParentID
-		}
-		logicalSize := int64(0)
-		if branch.LogicalSize != nil {
-			logicalSize = *branch.LogicalSize
-		}
-		primary := false
-		if branch.Primary != nil {
-			primary = *branch.Primary
-		}
-		branches = append(branches, branchModel{
-			ID:          types.StringValue(branch.ID),
-			Name:        types.StringValue(branch.Name),
-			ParentID:    types.StringValue(parentID),
-			LogicalSize: types.Int64Value(logicalSize),
-			Primary:     types.BoolValue(primary),
-		})
-	}
-
-	data.Branches = branches
 	data.ID = data.ProjectID
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
