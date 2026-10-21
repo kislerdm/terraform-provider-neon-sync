@@ -63,12 +63,10 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 							Description: "Branch ID.",
 						},
 						"name": schema.StringAttribute{
-							Optional:    true,
 							Computed:    true,
 							Description: "Branch name.",
 						},
 						"parent_id": schema.StringAttribute{
-							Optional:    true,
 							Computed:    true,
 							Description: "Parent branch ID. Empty when the API omits it.",
 						},
