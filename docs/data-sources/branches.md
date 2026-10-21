@@ -37,15 +37,12 @@ output "branch_names" {
 <a id="nestedatt--branches"></a>
 ### Nested Schema for `branches`
 
-Optional:
-
-- `name` (String) Branch name.
-- `parent_id` (String) Parent branch ID. Empty when the API omits it.
-
 Read-Only:
 
 - `default` (Boolean) Default branch flag.
 - `id` (String) Branch ID.
 - `logical_size` (Number) Branch logical size in bytes. Zero when the API omits it.
+- `name` (String) Branch name.
+- `parent_id` (String) Parent branch ID. Empty when the API omits it.
 - `primary` (Boolean, Deprecated) Primary branch flag.
 - `protected` (Boolean) Protected branch flag.

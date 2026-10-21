@@ -240,6 +240,9 @@ func TestBranchesDataSource(t *testing.T) {
 								continue
 							}
 							for _, field := range attribute.NestedType.Attributes {
+								require.True(t, field.Computed, field.Name)
+								require.False(t, field.Optional, field.Name)
+								require.False(t, field.Required, field.Name)
 								if field.Name == "primary" {
 									primary = field
 								}
@@ -504,6 +507,10 @@ func TestBranchesDataSourceConfiguredOutputs(t *testing.T) {
 		{
 			name:   "branches block",
 			output: `branches { name = "configured-name" }`,
+		},
+		{
+			name:   "unsupported name input",
+			output: `name = "configured-name"`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
