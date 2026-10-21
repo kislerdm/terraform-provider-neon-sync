@@ -138,6 +138,9 @@ func TestBranchesDataSource(t *testing.T) {
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.0.protected", "true",
 				),
+				resource.TestCheckOutput("null_parent_ids", ""),
+				resource.TestCheckOutput("null_size_ids", ""),
+				resource.TestCheckOutput("null_primary_ids", ""),
 			),
 		},
 		{
@@ -182,15 +185,9 @@ func TestBranchesDataSource(t *testing.T) {
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.1.name", "second",
 				),
-				resource.TestCheckResourceAttr(
-					branchesAddress, "branches.1.parent_id", "",
-				),
-				resource.TestCheckResourceAttr(
-					branchesAddress, "branches.1.logical_size", "0",
-				),
-				resource.TestCheckResourceAttr(
-					branchesAddress, "branches.1.primary", "false",
-				),
+				resource.TestCheckOutput("null_parent_ids", "br-second-456"),
+				resource.TestCheckOutput("null_size_ids", "br-second-456"),
+				resource.TestCheckOutput("null_primary_ids", "br-second-456"),
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.1.default", "true",
 				),
@@ -252,7 +249,7 @@ func TestBranchesDataSource(t *testing.T) {
 						require.True(t, primary.Deprecated)
 					}
 					step := resource.TestStep{
-						Config: branchesDataSourceConfig(tt.projectID),
+						Config: branchesDataSourceConfig(tt.projectID, ""),
 					}
 					if tt.wantError != "" {
 						step.ExpectError = regexp.MustCompile(regexp.QuoteMeta(tt.wantError))
@@ -273,6 +270,118 @@ func TestBranchesDataSource(t *testing.T) {
 					})
 				})
 			}
+		})
+	}
+}
+
+func TestBranchesDataSourceFiltering(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		nameConfig string
+		query      url.Values
+		body       string
+		wantCount  string
+		wantNull   string
+		wantName   string
+	}{
+		{
+			name:      "unset filter",
+			body:      branchesOneResponse,
+			wantCount: "1",
+			wantNull:  "true",
+		},
+		{
+			name:       "null filter",
+			nameConfig: `name = null`,
+			body:       branchesOneResponse,
+			wantCount:  "1",
+			wantNull:   "true",
+		},
+		{
+			name:       "empty filter",
+			nameConfig: `name = ""`,
+			body:       branchesOneResponse,
+			wantCount:  "1",
+			wantNull:   "false",
+			wantName:   "",
+		},
+		{
+			name:       "partial name search",
+			nameConfig: `name = "mai"`,
+			query:      url.Values{"search": {"mai"}},
+			body:       branchesOneResponse,
+			wantCount:  "1",
+			wantNull:   "false",
+			wantName:   "mai",
+		},
+		{
+			name:       "partial ID search",
+			nameConfig: `name = "br-first"`,
+			query:      url.Values{"search": {"br-first"}},
+			body:       branchesOneResponse,
+			wantCount:  "1",
+			wantNull:   "false",
+			wantName:   "br-first",
+		},
+		{
+			name:       "reserved search characters preserve state",
+			nameConfig: `name = "  unmatched+filter&value/one=two  "`,
+			query:      url.Values{"search": {"  unmatched+filter&value/one=two  "}},
+			body: `{
+  "branches": []
+}`,
+			wantCount: "0",
+			wantNull:  "false",
+			wantName:  "  unmatched+filter&value/one=two  ",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := &branchesPaginationHTTPFixture{
+				t: t,
+				pages: []branchesPage{
+					{
+						query:  tt.query,
+						status: http.StatusOK,
+						body:   tt.body,
+					},
+				},
+			}
+			client, err := neon.NewClient(neon.Config{
+				Key:        "test",
+				HTTPClient: fixture,
+			})
+			require.NoError(t, err)
+			checks := []resource.TestCheckFunc{
+				resource.TestCheckResourceAttr(
+					branchesAddress, "id", "cool-moon-42",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "project_id", "cool-moon-42",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.#", tt.wantCount,
+				),
+				resource.TestCheckOutput("name_is_null", tt.wantNull),
+			}
+			if tt.wantNull == "false" {
+				checks = append(checks, resource.TestCheckResourceAttr(
+					branchesAddress, "name", tt.wantName,
+				))
+			}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: newUnitTestProviderFactories(&providerAdapter{sdk: client}),
+				Steps: []resource.TestStep{
+					{
+						Config: branchesDataSourceConfig("cool-moon-42", tt.nameConfig) + `
+output "name_is_null" {
+  value = data.neon_branches.this.name == null
+}
+`,
+						Check: resource.ComposeAggregateTestCheckFunc(checks...),
+					},
+				},
+			})
 		})
 	}
 }
@@ -302,15 +411,22 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 		"sort_by":    {"updated_at"},
 		"sort_order": {"desc"},
 	}
+	filteredNextQuery := url.Values{
+		"search":     {"br-"},
+		"cursor":     {"next+page/with=cursor&value"},
+		"sort_by":    {"updated_at"},
+		"sort_order": {"desc"},
+	}
 	lastQuery := url.Values{
 		"cursor":     {"last-page"},
 		"sort_by":    {"updated_at"},
 		"sort_order": {"desc"},
 	}
 	for _, tt := range []struct {
-		name      string
-		pages     []branchesPage
-		wantError string
+		name       string
+		nameConfig string
+		pages      []branchesPage
+		wantError  string
 	}{
 		{
 			name: "three pages retain order and sorting",
@@ -334,14 +450,16 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			},
 		},
 		{
-			name: "later page retry adds no duplicate branches",
+			name:       "filtered later page retry adds no duplicate branches",
+			nameConfig: `name = "br-"`,
 			pages: []branchesPage{
 				{
+					query:  url.Values{"search": {"br-"}},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
 				{
-					query:  nextQuery,
+					query:  filteredNextQuery,
 					status: http.StatusTooManyRequests,
 					body: `{
   "code": "RATE_LIMITED",
@@ -349,11 +467,39 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 }`,
 				},
 				{
-					query:  nextQuery,
+					query:  filteredNextQuery,
 					status: http.StatusOK,
 					body:   lastPage,
 				},
 			},
+		},
+		{
+			name: "unsupported SDK sort field rejects partial results",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body: strings.Replace(firstPage,
+						`"sort_by": "updated_at"`,
+						`"sort_by": "future-sort"`,
+						1,
+					),
+				},
+			},
+			wantError: "unknown value: future-sort",
+		},
+		{
+			name: "unsupported SDK sort order rejects partial results",
+			pages: []branchesPage{
+				{
+					status: http.StatusOK,
+					body: strings.Replace(firstPage,
+						`"sort_order": "desc"`,
+						`"sort_order": "future-order"`,
+						1,
+					),
+				},
+			},
+			wantError: "unknown value: future-order",
 		},
 		{
 			name: "later page failure rejects partial results",
@@ -435,7 +581,7 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			})
 			require.NoError(t, err)
 			step := resource.TestStep{
-				Config: branchesDataSourceConfig("cool-moon-42"),
+				Config: branchesDataSourceConfig("cool-moon-42", tt.nameConfig),
 			}
 			if tt.wantError != "" {
 				step.ExpectError = regexp.MustCompile(regexp.QuoteMeta(tt.wantError))
@@ -508,10 +654,6 @@ func TestBranchesDataSourceConfiguredOutputs(t *testing.T) {
 			name:   "branches block",
 			output: `branches { name = "configured-name" }`,
 		},
-		{
-			name:   "unsupported name input",
-			output: `name = "configured-name"`,
-		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			client := newBranchesTestClient(t, "cool-moon-42", http.StatusOK, branchesOneResponse)
@@ -533,16 +675,29 @@ data "neon_branches" "this" {
 	}
 }
 
-func branchesDataSourceConfig(projectID string) string {
+func branchesDataSourceConfig(projectID, nameConfig string) string {
 	return fmt.Sprintf(`
 data "neon_branches" "this" {
   project_id = %q
+  %s
 }
 
 output "branch_count" {
   value = length(data.neon_branches.this.branches)
 }
-`, projectID)
+
+output "null_parent_ids" {
+  value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.parent_id == null])
+}
+
+output "null_size_ids" {
+  value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.logical_size == null])
+}
+
+output "null_primary_ids" {
+  value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.primary == null])
+}
+`, projectID, nameConfig)
 }
 
 type branchesPage struct {
