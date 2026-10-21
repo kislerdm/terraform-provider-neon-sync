@@ -20,6 +20,7 @@ type neonBranchesDataSource struct {
 type neonBranchesDataSourceModel struct {
 	ID        types.String  `tfsdk:"id"`
 	ProjectID types.String  `tfsdk:"project_id"`
+	Name      types.String  `tfsdk:"name"`
 	Branches  []branchModel `tfsdk:"branches"`
 }
 
@@ -53,6 +54,10 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Required:    true,
 				Description: "Project ID.",
 			},
+			"name": schema.StringAttribute{
+				Optional:    true,
+				Description: "Filter by partial branch name or ID.",
+			},
 			"branches": schema.ListNestedAttribute{
 				Computed:    true,
 				Description: "Project branches in API response order.",
@@ -68,11 +73,11 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 						},
 						"parent_id": schema.StringAttribute{
 							Computed:    true,
-							Description: "Parent branch ID. Empty when the API omits it.",
+							Description: "Parent branch ID. Null when absent.",
 						},
 						"logical_size": schema.Int64Attribute{
 							Computed:    true,
-							Description: "Branch logical size in bytes. Zero when the API omits it.",
+							Description: "Branch logical size in bytes. Null when absent.",
 						},
 						"primary": schema.BoolAttribute{
 							Computed:           true,
@@ -122,6 +127,11 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 
+	var search *string
+	if data.Name.ValueString() != "" {
+		value := url.QueryEscape(data.Name.ValueString())
+		search = &value
+	}
 	data.Branches = make([]branchModel, 0)
 	var cursor *string
 	var sortBy *neon.ListProjectBranchesSortBy
@@ -135,7 +145,7 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 			var err error
 			result, err = d.client.ListProjectBranches(
-				data.ProjectID.ValueString(), nil, sortBy, cursor, sortOrder, nil, nil,
+				data.ProjectID.ValueString(), search, sortBy, cursor, sortOrder, nil, nil,
 			)
 			return err
 		}, ctx)...)
@@ -144,24 +154,12 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		}
 
 		for _, branch := range result.Branches {
-			parentID := ""
-			if branch.ParentID != nil {
-				parentID = *branch.ParentID
-			}
-			logicalSize := int64(0)
-			if branch.LogicalSize != nil {
-				logicalSize = *branch.LogicalSize
-			}
-			primary := false
-			if branch.Primary != nil {
-				primary = *branch.Primary
-			}
 			data.Branches = append(data.Branches, branchModel{
 				ID:          types.StringValue(branch.ID),
 				Name:        types.StringValue(branch.Name),
-				ParentID:    types.StringValue(parentID),
-				LogicalSize: types.Int64Value(logicalSize),
-				Primary:     types.BoolValue(primary),
+				ParentID:    types.StringPointerValue(branch.ParentID),
+				LogicalSize: types.Int64PointerValue(branch.LogicalSize),
+				Primary:     types.BoolPointerValue(branch.Primary),
 				Default:     types.BoolValue(branch.Default),
 				Protected:   types.BoolValue(branch.Protected),
 			})

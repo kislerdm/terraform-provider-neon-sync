@@ -7,7 +7,9 @@ description: |-
 # neon_branches (Data Source)
 
 Fetch Project Branches.
-The `branches` collection is read-only; its nested fields cannot be configured as filters.
+Set top-level `name` to search partial branch names or IDs; unset, `null`, or empty values disable filtering.
+The `branches` collection and its nested fields are read-only.
+`parent_id`, `logical_size`, and `primary` are null when the API omits them; explicit empty strings, zero, and false remain unchanged.
 `primary` is deprecated; use `default` instead.
 
 ## Example Usage
@@ -15,6 +17,7 @@ The `branches` collection is read-only; its nested fields cannot be configured a
 ```terraform
 data "neon_branches" "example" {
   project_id = "cool-moon-42"
+  name       = "main"
 }
 
 output "branch_names" {
@@ -29,6 +32,10 @@ output "branch_names" {
 
 - `project_id` (String) Project ID.
 
+### Optional
+
+- `name` (String) Filter by partial branch name or ID.
+
 ### Read-Only
 
 - `branches` (Attributes List) Project branches in API response order. (see [below for nested schema](#nestedatt--branches))
@@ -41,8 +48,8 @@ Read-Only:
 
 - `default` (Boolean) Default branch flag.
 - `id` (String) Branch ID.
-- `logical_size` (Number) Branch logical size in bytes. Zero when the API omits it.
+- `logical_size` (Number) Branch logical size in bytes. Null when absent.
 - `name` (String) Branch name.
-- `parent_id` (String) Parent branch ID. Empty when the API omits it.
+- `parent_id` (String) Parent branch ID. Null when absent.
 - `primary` (Boolean, Deprecated) Primary branch flag.
 - `protected` (Boolean) Protected branch flag.

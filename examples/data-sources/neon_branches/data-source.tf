@@ -1,5 +1,6 @@
 data "neon_branches" "example" {
   project_id = "cool-moon-42"
+  name       = "main"
 }
 
 output "branch_names" {
