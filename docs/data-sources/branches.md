@@ -7,8 +7,9 @@ description: |-
 # neon_branches (Data Source)
 
 Fetch Project Branches.
-Set top-level `name` to search partial branch names or IDs; unset, `null`, or empty values disable filtering.
-The `branches` collection and its nested fields are read-only.
+Set `filter` to search partial branch names or IDs; unset, `null`, or empty values disable filtering.
+The API returns branches in ascending branch-name order, requested consistently across all pages.
+The `branches` collection and its nested fields, including `name`, are read-only.
 `parent_id`, `logical_size`, and `primary` are null when the API omits them; explicit empty strings, zero, and false remain unchanged.
 `primary` is deprecated; use `default` instead.
 
@@ -17,7 +18,7 @@ The `branches` collection and its nested fields are read-only.
 ```terraform
 data "neon_branches" "example" {
   project_id = "cool-moon-42"
-  name       = "main"
+  filter     = "main"
 }
 
 output "branch_names" {
@@ -34,7 +35,7 @@ output "branch_names" {
 
 ### Optional
 
-- `name` (String) Filter by partial branch name or ID.
+- `filter` (String) Filter by partial branch name or ID.
 
 ### Read-Only
 
