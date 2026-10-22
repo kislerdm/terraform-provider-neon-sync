@@ -20,7 +20,7 @@ type neonBranchesDataSource struct {
 type neonBranchesDataSourceModel struct {
 	ID        types.String  `tfsdk:"id"`
 	ProjectID types.String  `tfsdk:"project_id"`
-	Name      types.String  `tfsdk:"name"`
+	Filter    types.String  `tfsdk:"filter"`
 	Branches  []branchModel `tfsdk:"branches"`
 }
 
@@ -54,7 +54,7 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Required:    true,
 				Description: "Project ID.",
 			},
-			"name": schema.StringAttribute{
+			"filter": schema.StringAttribute{
 				Optional:    true,
 				Description: "Filter by partial branch name or ID.",
 			},
@@ -128,14 +128,14 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 	}
 
 	var search *string
-	if data.Name.ValueString() != "" {
-		value := url.QueryEscape(data.Name.ValueString())
+	if data.Filter.ValueString() != "" {
+		value := url.QueryEscape(data.Filter.ValueString())
 		search = &value
 	}
 	data.Branches = make([]branchModel, 0)
 	var cursor *string
-	var sortBy *neon.ListProjectBranchesSortBy
-	var sortOrder *neon.SortOrderParam
+	sortBy := neon.ListProjectBranchesSortByName
+	sortOrder := neon.SortOrderParamAsc
 	for {
 		if err := ctx.Err(); err != nil {
 			resp.Diagnostics.Append(frameworkDiagnostics(err)...)
@@ -145,7 +145,7 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
 			var err error
 			result, err = d.client.ListProjectBranches(
-				data.ProjectID.ValueString(), search, sortBy, cursor, sortOrder, nil, nil,
+				data.ProjectID.ValueString(), search, &sortBy, cursor, &sortOrder, nil, nil,
 			)
 			return err
 		}, ctx)...)
@@ -168,22 +168,6 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		pagination := result.Pagination
 		if pagination == nil || pagination.Next == nil || *pagination.Next == "" {
 			break
-		}
-		if pagination.SortBy != nil {
-			value, err := neon.NewListProjectBranchesSortBy(*pagination.SortBy)
-			if err != nil {
-				resp.Diagnostics.Append(frameworkDiagnostics(err)...)
-				return
-			}
-			sortBy = &value
-		}
-		if pagination.SortOrder != nil {
-			value, err := neon.NewSortOrderParam(*pagination.SortOrder)
-			if err != nil {
-				resp.Diagnostics.Append(frameworkDiagnostics(err)...)
-				return
-			}
-			sortOrder = &value
 		}
 		next := url.QueryEscape(*pagination.Next)
 		cursor = &next

@@ -277,63 +277,87 @@ func TestBranchesDataSource(t *testing.T) {
 func TestBranchesDataSourceFiltering(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		name       string
-		nameConfig string
-		query      url.Values
-		body       string
-		wantCount  string
-		wantNull   string
-		wantName   string
+		name         string
+		filterConfig string
+		query        url.Values
+		body         string
+		wantCount    string
+		wantNull     string
+		wantFilter   string
 	}{
 		{
-			name:      "unset filter",
+			name: "unset filter",
+			query: url.Values{
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
 			body:      branchesOneResponse,
 			wantCount: "1",
 			wantNull:  "true",
 		},
 		{
-			name:       "null filter",
-			nameConfig: `name = null`,
-			body:       branchesOneResponse,
-			wantCount:  "1",
-			wantNull:   "true",
+			name: "null filter",
+			query: url.Values{
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
+			filterConfig: `filter = null`,
+			body:         branchesOneResponse,
+			wantCount:    "1",
+			wantNull:     "true",
 		},
 		{
-			name:       "empty filter",
-			nameConfig: `name = ""`,
+			name: "empty filter",
+			query: url.Values{
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
+			filterConfig: `filter = ""`,
+			body:         branchesOneResponse,
+			wantCount:    "1",
+			wantNull:     "false",
+			wantFilter:   "",
+		},
+		{
+			name:         "partial name search",
+			filterConfig: `filter = "mai"`,
+			query: url.Values{
+				"search":     {"mai"},
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
 			body:       branchesOneResponse,
 			wantCount:  "1",
 			wantNull:   "false",
-			wantName:   "",
+			wantFilter: "mai",
 		},
 		{
-			name:       "partial name search",
-			nameConfig: `name = "mai"`,
-			query:      url.Values{"search": {"mai"}},
+			name:         "partial ID search",
+			filterConfig: `filter = "br-first"`,
+			query: url.Values{
+				"search":     {"br-first"},
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
 			body:       branchesOneResponse,
 			wantCount:  "1",
 			wantNull:   "false",
-			wantName:   "mai",
+			wantFilter: "br-first",
 		},
 		{
-			name:       "partial ID search",
-			nameConfig: `name = "br-first"`,
-			query:      url.Values{"search": {"br-first"}},
-			body:       branchesOneResponse,
-			wantCount:  "1",
-			wantNull:   "false",
-			wantName:   "br-first",
-		},
-		{
-			name:       "reserved search characters preserve state",
-			nameConfig: `name = "  unmatched+filter&value/one=two  "`,
-			query:      url.Values{"search": {"  unmatched+filter&value/one=two  "}},
+			name:         "reserved search characters preserve state",
+			filterConfig: `filter = "  unmatched+filter&value/one=two  "`,
+			query: url.Values{
+				"search":     {"  unmatched+filter&value/one=two  "},
+				"sort_by":    {"name"},
+				"sort_order": {"asc"},
+			},
 			body: `{
   "branches": []
 }`,
-			wantCount: "0",
-			wantNull:  "false",
-			wantName:  "  unmatched+filter&value/one=two  ",
+			wantCount:  "0",
+			wantNull:   "false",
+			wantFilter: "  unmatched+filter&value/one=two  ",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -362,20 +386,20 @@ func TestBranchesDataSourceFiltering(t *testing.T) {
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.#", tt.wantCount,
 				),
-				resource.TestCheckOutput("name_is_null", tt.wantNull),
+				resource.TestCheckOutput("filter_is_null", tt.wantNull),
 			}
 			if tt.wantNull == "false" {
 				checks = append(checks, resource.TestCheckResourceAttr(
-					branchesAddress, "name", tt.wantName,
+					branchesAddress, "filter", tt.wantFilter,
 				))
 			}
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: newUnitTestProviderFactories(&providerAdapter{sdk: client}),
 				Steps: []resource.TestStep{
 					{
-						Config: branchesDataSourceConfig("cool-moon-42", tt.nameConfig) + `
-output "name_is_null" {
-  value = data.neon_branches.this.name == null
+						Config: branchesDataSourceConfig("cool-moon-42", tt.filterConfig) + `
+output "filter_is_null" {
+  value = data.neon_branches.this.filter == null
 }
 `,
 						Check: resource.ComposeAggregateTestCheckFunc(checks...),
@@ -391,8 +415,8 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 	firstPage := strings.TrimSuffix(branchesTwoResponse, "\n}") + `,
   "pagination": {
     "next": "next+page/with=cursor&value",
-    "sort_by": "updated_at",
-    "sort_order": "desc"
+    "sort_by": "name",
+    "sort_order": "asc"
   }
 }`
 	lastPage := strings.NewReplacer(
@@ -408,30 +432,34 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 }`
 	nextQuery := url.Values{
 		"cursor":     {"next+page/with=cursor&value"},
-		"sort_by":    {"updated_at"},
-		"sort_order": {"desc"},
+		"sort_by":    {"name"},
+		"sort_order": {"asc"},
 	}
 	filteredNextQuery := url.Values{
 		"search":     {"br-"},
 		"cursor":     {"next+page/with=cursor&value"},
-		"sort_by":    {"updated_at"},
-		"sort_order": {"desc"},
+		"sort_by":    {"name"},
+		"sort_order": {"asc"},
 	}
 	lastQuery := url.Values{
 		"cursor":     {"last-page"},
-		"sort_by":    {"updated_at"},
-		"sort_order": {"desc"},
+		"sort_by":    {"name"},
+		"sort_order": {"asc"},
 	}
 	for _, tt := range []struct {
-		name       string
-		nameConfig string
-		pages      []branchesPage
-		wantError  string
+		name         string
+		filterConfig string
+		pages        []branchesPage
+		wantError    string
 	}{
 		{
-			name: "three pages retain order and sorting",
+			name: "three pages request name ascending",
 			pages: []branchesPage{
 				{
+					query: url.Values{
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -450,11 +478,15 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			},
 		},
 		{
-			name:       "filtered later page retry adds no duplicate branches",
-			nameConfig: `name = "br-"`,
+			name:         "filtered later page retry adds no duplicate branches",
+			filterConfig: `filter = "br-"`,
 			pages: []branchesPage{
 				{
-					query:  url.Values{"search": {"br-"}},
+					query: url.Values{
+						"search":     {"br-"},
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -474,37 +506,13 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			},
 		},
 		{
-			name: "unsupported SDK sort field rejects partial results",
-			pages: []branchesPage{
-				{
-					status: http.StatusOK,
-					body: strings.Replace(firstPage,
-						`"sort_by": "updated_at"`,
-						`"sort_by": "future-sort"`,
-						1,
-					),
-				},
-			},
-			wantError: "unknown value: future-sort",
-		},
-		{
-			name: "unsupported SDK sort order rejects partial results",
-			pages: []branchesPage{
-				{
-					status: http.StatusOK,
-					body: strings.Replace(firstPage,
-						`"sort_order": "desc"`,
-						`"sort_order": "future-order"`,
-						1,
-					),
-				},
-			},
-			wantError: "unknown value: future-order",
-		},
-		{
 			name: "later page failure rejects partial results",
 			pages: []branchesPage{
 				{
+					query: url.Values{
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -523,6 +531,10 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			name: "null pagination ends traversal",
 			pages: []branchesPage{
 				{
+					query: url.Values{
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -539,6 +551,10 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			name: "absent next cursor ends traversal",
 			pages: []branchesPage{
 				{
+					query: url.Values{
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -555,6 +571,10 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			name: "empty next cursor ends traversal",
 			pages: []branchesPage{
 				{
+					query: url.Values{
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusOK,
 					body:   firstPage,
 				},
@@ -581,7 +601,7 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 			})
 			require.NoError(t, err)
 			step := resource.TestStep{
-				Config: branchesDataSourceConfig("cool-moon-42", tt.nameConfig),
+				Config: branchesDataSourceConfig("cool-moon-42", tt.filterConfig),
 			}
 			if tt.wantError != "" {
 				step.ExpectError = regexp.MustCompile(regexp.QuoteMeta(tt.wantError))
@@ -643,6 +663,10 @@ func TestBranchesDataSourceConfiguredOutputs(t *testing.T) {
 		output string
 	}{
 		{
+			name:   "former name input",
+			output: `name = "main"`,
+		},
+		{
 			name:   "id",
 			output: `id = "configured-id"`,
 		},
@@ -675,7 +699,7 @@ data "neon_branches" "this" {
 	}
 }
 
-func branchesDataSourceConfig(projectID, nameConfig string) string {
+func branchesDataSourceConfig(projectID, filterConfig string) string {
 	return fmt.Sprintf(`
 data "neon_branches" "this" {
   project_id = %q
@@ -697,7 +721,7 @@ output "null_size_ids" {
 output "null_primary_ids" {
   value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.primary == null])
 }
-`, projectID, nameConfig)
+`, projectID, filterConfig)
 }
 
 type branchesPage struct {
@@ -740,7 +764,13 @@ type branchesHTTPFixture struct {
 
 func (f branchesHTTPFixture) Do(req *http.Request) (*http.Response, error) {
 	f.t.Helper()
-	require.Empty(f.t, req.URL.RawQuery, "listing must keep all optional parameters unset")
+	query := url.Values{
+		"sort_by":    {"name"},
+		"sort_order": {"asc"},
+	}
+	if !reflect.DeepEqual(query, req.URL.Query()) {
+		f.t.Errorf("unexpected branches query: got %v, want %v", req.URL.Query(), query)
+	}
 	return f.branchDataSourceHTTPFixture.Do(req)
 }
 
