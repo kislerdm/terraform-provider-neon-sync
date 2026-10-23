@@ -73,11 +73,11 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 						},
 						"parent_id": schema.StringAttribute{
 							Computed:    true,
-							Description: "Parent branch ID. Null when absent.",
+							Description: "Parent branch ID.",
 						},
 						"logical_size": schema.Int64Attribute{
 							Computed:    true,
-							Description: "Branch logical size in bytes. Null when absent.",
+							Description: "Branch logical size in bytes.",
 						},
 						"primary": schema.BoolAttribute{
 							Computed:           true,

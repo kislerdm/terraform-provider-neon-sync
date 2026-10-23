@@ -10,7 +10,8 @@ Fetch Project Branches.
 Set `filter` to search partial branch names or IDs; unset, `null`, or empty values disable filtering.
 The API returns branches in ascending branch-name order, requested consistently across all pages.
 The `branches` collection and its nested fields, including `name`, are read-only.
-`parent_id`, `logical_size`, and `primary` are null when the API omits them; explicit empty strings, zero, and false remain unchanged.
+`parent_id`, `logical_size`, and `primary` return Terraform `null` when the API omits them or returns JSON `null`.
+Explicit empty strings, zero, and false remain unchanged.
 `primary` is deprecated; use `default` instead.
 
 ## Example Usage
@@ -49,8 +50,8 @@ Read-Only:
 
 - `default` (Boolean) Default branch flag.
 - `id` (String) Branch ID.
-- `logical_size` (Number) Branch logical size in bytes. Null when absent.
+- `logical_size` (Number) Branch logical size in bytes.
 - `name` (String) Branch name.
-- `parent_id` (String) Parent branch ID. Null when absent.
+- `parent_id` (String) Parent branch ID.
 - `primary` (Boolean, Deprecated) Primary branch flag.
 - `protected` (Boolean) Protected branch flag.
