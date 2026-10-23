@@ -9,11 +9,11 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	schemaTFSDK "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	typesTFSDK "github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
@@ -26,30 +26,30 @@ type neonBranchResource struct {
 }
 
 type neonBranchResourceModel struct {
-	ID              typesTFSDK.String `tfsdk:"id"`
-	ProjectID       typesTFSDK.String `tfsdk:"project_id"`
-	Name            typesTFSDK.String `tfsdk:"name"`
-	ParentID        typesTFSDK.String `tfsdk:"parent_id"`
-	ParentLsn       typesTFSDK.String `tfsdk:"parent_lsn"`
-	ParentTimestamp typesTFSDK.Int64  `tfsdk:"parent_timestamp"`
-	LogicalSize     typesTFSDK.Int64  `tfsdk:"logical_size"`
-	Protected       typesTFSDK.Bool   `tfsdk:"protected"`
+	ID              types.String `tfsdk:"id"`
+	ProjectID       types.String `tfsdk:"project_id"`
+	Name            types.String `tfsdk:"name"`
+	ParentID        types.String `tfsdk:"parent_id"`
+	ParentLsn       types.String `tfsdk:"parent_lsn"`
+	ParentTimestamp types.Int64  `tfsdk:"parent_timestamp"`
+	LogicalSize     types.Int64  `tfsdk:"logical_size"`
+	Protected       types.Bool   `tfsdk:"protected"`
 	// TODO: add annotations as map[string]any
 }
 
 func (v *neonBranchResourceModel) inferAttr(branch neon.Branch) {
-	v.ID = typesTFSDK.StringValue(branch.ID)
-	v.ProjectID = typesTFSDK.StringValue(branch.ProjectID)
-	v.Name = typesTFSDK.StringValue(branch.Name)
-	v.ParentID = typesTFSDK.StringPointerValue(branch.ParentID)
-	v.ParentLsn = typesTFSDK.StringPointerValue(branch.ParentLsn)
+	v.ID = types.StringValue(branch.ID)
+	v.ProjectID = types.StringValue(branch.ProjectID)
+	v.Name = types.StringValue(branch.Name)
+	v.ParentID = types.StringPointerValue(branch.ParentID)
+	v.ParentLsn = types.StringPointerValue(branch.ParentLsn)
 	var parentTimestamp int64
 	if branch.ParentTimestamp != nil {
 		parentTimestamp = branch.ParentTimestamp.Unix()
 	}
-	v.ParentTimestamp = typesTFSDK.Int64Value(parentTimestamp)
-	v.Protected = typesTFSDK.BoolValue(branch.Protected)
-	v.LogicalSize = typesTFSDK.Int64PointerValue(branch.LogicalSize)
+	v.ParentTimestamp = types.Int64Value(parentTimestamp)
+	v.Protected = types.BoolValue(branch.Protected)
+	v.LogicalSize = types.Int64PointerValue(branch.LogicalSize)
 }
 
 func NewNeonBranchResource() resource.Resource {
@@ -60,56 +60,56 @@ func (r *neonBranchResource) Metadata(_ context.Context, _ resource.MetadataRequ
 	resp.TypeName = "neon_branch"
 }
 
-func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
-
-	resp.Schema = schemaTFSDK.Schema{
-		Description: "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
-		Attributes: map[string]schemaTFSDK.Attribute{
-			"id": schemaTFSDK.StringAttribute{
-				Computed:    true,
-				Description: "The Neon branch ID.",
-			},
-			"project_id": schemaTFSDK.StringAttribute{
-				Required:      true,
-				PlanModifiers: requiresReplace,
-				Description:   "The Neon project ID",
-			},
-			"name": schemaTFSDK.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "The branch name.",
-			},
-			"parent_id": schemaTFSDK.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "The ID of the branch to check out.",
-			},
-			"parent_lsn": schemaTFSDK.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+var branchSchemaAttributes = map[string]schema.Attribute{
+	"id": schema.StringAttribute{
+		Computed:    true,
+		Description: "Branch ID.",
+	},
+	"project_id": schema.StringAttribute{
+		Required:      true,
+		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+		Description:   "Project ID",
+	},
+	"name": schema.StringAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "The branch name.",
+	},
+	"parent_id": schema.StringAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "The ID of the branch to check out.",
+	},
+	"parent_lsn": schema.StringAttribute{
+		Optional: true,
+		Computed: true,
+		Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
 See details: https://neon.tech/docs/reference/glossary/#lsn
 **Conflicts with parent_timestamp**.`,
-			},
-			"parent_timestamp": schemaTFSDK.Int64Attribute{
-				Optional:   true,
-				Computed:   true,
-				Validators: []validator.Int64{notNegativeInt64},
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+	},
+	"parent_timestamp": schema.Int64Attribute{
+		Optional:   true,
+		Computed:   true,
+		Validators: []validator.Int64{notNegativeInt64},
+		Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
 See details: https://neon.tech/docs/reference/glossary/#lsn
 **Conflicts with parent_lsn**.`,
-			},
-			"logical_size": schemaTFSDK.Int64Attribute{
-				Computed:    true,
-				Description: "Branch logical size in MB.",
-			},
-			"protected": schemaTFSDK.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Set whether the branch is protected.",
-			},
-		},
+	},
+	"logical_size": schema.Int64Attribute{
+		Computed:    true,
+		Description: "Branch logical size in MB.",
+	},
+	"protected": schema.BoolAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "Set whether the branch is protected.",
+	},
+}
+
+func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
+		Attributes:  branchSchemaAttributes,
 	}
 }
 
