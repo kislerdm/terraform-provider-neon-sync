@@ -514,10 +514,18 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 						"sort_order": {"asc"},
 					},
 					status: http.StatusOK,
-					body:   firstPage,
+					body: strings.Replace(firstPage,
+						`"next": "next+page/with=cursor&value"`,
+						`"next": ""`,
+						1,
+					),
 				},
 				{
-					query:  nextQuery,
+					query: url.Values{
+						"cursor":     {""},
+						"sort_by":    {"name"},
+						"sort_order": {"asc"},
+					},
 					status: http.StatusForbidden,
 					body: `{
   "code": "FORBIDDEN",
@@ -563,28 +571,6 @@ func TestBranchesDataSourcePagination(t *testing.T) {
 					status: http.StatusOK,
 					body: strings.TrimSuffix(lastPage, "\n}") + `,
   "pagination": {}
-}`,
-				},
-			},
-		},
-		{
-			name: "empty next cursor ends traversal",
-			pages: []branchesPage{
-				{
-					query: url.Values{
-						"sort_by":    {"name"},
-						"sort_order": {"asc"},
-					},
-					status: http.StatusOK,
-					body:   firstPage,
-				},
-				{
-					query:  nextQuery,
-					status: http.StatusOK,
-					body: strings.TrimSuffix(lastPage, "\n}") + `,
-  "pagination": {
-    "next": ""
-  }
 }`,
 				},
 			},
