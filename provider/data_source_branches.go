@@ -165,11 +165,14 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 			})
 		}
 
-		pagination := result.Pagination
-		if pagination == nil || pagination.Next == nil || *pagination.Next == "" {
+		cursor = nil
+		if result.Pagination != nil {
+			cursor = result.Pagination.Next
+		}
+		if cursor == nil {
 			break
 		}
-		next := url.QueryEscape(*pagination.Next)
+		next := url.QueryEscape(*cursor)
 		cursor = &next
 	}
 
