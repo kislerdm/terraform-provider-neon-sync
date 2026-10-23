@@ -2,56 +2,95 @@ package provider
 
 import (
 	"context"
-	"fmt"
+	"net/url"
 
-	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
-func dataSourceBranches() *schema.Resource {
-	return &schema.Resource{
-		Description:   "Fetch Project Branches.",
-		SchemaVersion: 1,
-		ReadContext:   dataSourceBranchesRead,
-		Schema: map[string]*schema.Schema{
-			"project_id": {
-				Type:        schema.TypeString,
+var _ datasource.DataSource = (*neonBranchesDataSource)(nil)
+var _ datasource.DataSourceWithConfigure = (*neonBranchesDataSource)(nil)
+
+type neonBranchesDataSource struct {
+	client *neon.Client
+}
+
+type neonBranchesDataSourceModel struct {
+	ID        types.String  `tfsdk:"id"`
+	ProjectID types.String  `tfsdk:"project_id"`
+	Filter    types.String  `tfsdk:"filter"`
+	Branches  []branchModel `tfsdk:"branches"`
+}
+
+type branchModel struct {
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	ParentID    types.String `tfsdk:"parent_id"`
+	LogicalSize types.Int64  `tfsdk:"logical_size"`
+	Primary     types.Bool   `tfsdk:"primary"`
+	Default     types.Bool   `tfsdk:"default"`
+	Protected   types.Bool   `tfsdk:"protected"`
+}
+
+func NewBranchesDataSource() datasource.DataSource {
+	return &neonBranchesDataSource{}
+}
+
+func (d *neonBranchesDataSource) Metadata(_ context.Context, _ datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = "neon_branches"
+}
+
+func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: "Fetch Project Branches.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "Project ID.",
+			},
+			"project_id": schema.StringAttribute{
 				Required:    true,
 				Description: "Project ID.",
 			},
-			"branches": {
-				Type:     schema.TypeList,
-				Computed: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"id": {
-							Type:        schema.TypeString,
+			"filter": schema.StringAttribute{
+				Optional:    true,
+				Description: "Filter by partial branch name or ID.",
+			},
+			"branches": schema.ListNestedAttribute{
+				Computed:    true,
+				Description: "Project branches in API response order.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
 							Computed:    true,
 							Description: "Branch ID.",
 						},
-						"name": {
-							Type:        schema.TypeString,
-							Optional:    true,
+						"name": schema.StringAttribute{
 							Computed:    true,
 							Description: "Branch name.",
 						},
-						"parent_id": {
-							Type:        schema.TypeString,
-							Optional:    true,
+						"parent_id": schema.StringAttribute{
 							Computed:    true,
-							Description: "ID of the branch to checkout.",
+							Description: "Parent branch ID.",
 						},
-						"logical_size": {
-							Type:        schema.TypeInt,
+						"logical_size": schema.Int64Attribute{
 							Computed:    true,
-							Description: "Branch logical size in MB.",
+							Description: "Branch logical size in bytes.",
 						},
-						"primary": {
-							Type:        schema.TypeBool,
+						"primary": schema.BoolAttribute{
+							Computed:           true,
+							Description:        "Primary branch flag.",
+							DeprecationMessage: "Use default instead.",
+						},
+						"default": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Primary branch flag.",
+							Description: "Default branch flag.",
+						},
+						"protected": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Protected branch flag.",
 						},
 					},
 				},
@@ -60,42 +99,83 @@ func dataSourceBranches() *schema.Resource {
 	}
 }
 
-func dataSourceBranchesRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	tflog.Trace(ctx, "read Branches")
+func (d *neonBranchesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+	adapter, ok := req.ProviderData.(*providerAdapter)
+	if !ok {
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", "Expected *providerAdapter, got an unexpected type.")
+		return
+	}
+	if adapter == nil || adapter.sdk == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
+		return
+	}
+	d.client = adapter.sdk
+}
 
-	projectID := d.Get("project_id").(string)
-
-	d.SetId(fmt.Sprintf("%s/branches", projectID))
-
-	// TODO: add search qualifier for branches
-	resp, err := meta.(*neon.Client).ListProjectBranches(projectID, nil, nil, nil, nil, nil, nil)
-	if err != nil {
-		diag.FromErr(err)
+func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if d.client == nil {
+		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
+		return
 	}
 
-	var branches []map[string]interface{}
-	for _, v := range resp.Branches {
-		parentID := ""
-		if v.ParentID != nil {
-			parentID = *v.ParentID
+	var data neonBranchesDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var search *string
+	if data.Filter.ValueString() != "" {
+		value := url.QueryEscape(data.Filter.ValueString())
+		search = &value
+	}
+	data.Branches = make([]branchModel, 0)
+	var cursor *string
+	sortBy := neon.ListProjectBranchesSortByName
+	sortOrder := neon.SortOrderParamAsc
+	for {
+		if err := ctx.Err(); err != nil {
+			resp.Diagnostics.Append(frameworkDiagnostics(err)...)
+			return
 		}
-		logicalSize := int64(0)
-		if v.LogicalSize != nil {
-			logicalSize = *v.LogicalSize
+		var result neon.ListProjectBranchesRespObj
+		resp.Diagnostics.Append(projectReadiness.RetryFramework(func(_ context.Context) error {
+			var err error
+			result, err = d.client.ListProjectBranches(
+				data.ProjectID.ValueString(), search, &sortBy, cursor, &sortOrder, nil, nil,
+			)
+			return err
+		}, ctx)...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
 
-		branches = append(branches, map[string]interface{}{
-			"id":           v.ID,
-			"name":         v.Name,
-			"parent_id":    parentID,
-			"logical_size": logicalSize,
-			"primary":      v.Primary,
-		})
+		for _, branch := range result.Branches {
+			data.Branches = append(data.Branches, branchModel{
+				ID:          types.StringValue(branch.ID),
+				Name:        types.StringValue(branch.Name),
+				ParentID:    types.StringPointerValue(branch.ParentID),
+				LogicalSize: types.Int64PointerValue(branch.LogicalSize),
+				Primary:     types.BoolPointerValue(branch.Primary),
+				Default:     types.BoolValue(branch.Default),
+				Protected:   types.BoolValue(branch.Protected),
+			})
+		}
+
+		cursor = nil
+		if result.Pagination != nil {
+			cursor = result.Pagination.Next
+		}
+		if cursor == nil {
+			break
+		}
+		next := url.QueryEscape(*cursor)
+		cursor = &next
 	}
 
-	if err := d.Set("branches", branches); err != nil {
-		return diag.FromErr(err)
-	}
-
-	return diag.FromErr(nil)
+	data.ID = data.ProjectID
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
