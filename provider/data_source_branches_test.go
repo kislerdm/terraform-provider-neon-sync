@@ -26,6 +26,8 @@ const branchesOneResponse = `{
       "project_id": "response-project",
       "name": "main",
       "parent_id": "br-parent-789",
+      "parent_lsn": "0/16B6C50",
+      "parent_timestamp": "2026-01-01T00:00:00.123456Z",
       "logical_size": 1048577,
       "primary": true,
       "default": true,
@@ -51,6 +53,7 @@ const branchesTwoResponse = `{
       "project_id": "response-project",
       "name": "first",
       "parent_id": "",
+      "parent_lsn": "",
       "logical_size": 0,
       "primary": false,
       "default": false,
@@ -127,6 +130,15 @@ func TestBranchesDataSource(t *testing.T) {
 					branchesAddress, "branches.0.parent_id", "br-parent-789",
 				),
 				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.project_id", "response-project",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.parent_lsn", "0/16B6C50",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.parent_timestamp", "1767225600",
+				),
+				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.0.logical_size", "1048577",
 				),
 				resource.TestCheckResourceAttr(
@@ -139,6 +151,7 @@ func TestBranchesDataSource(t *testing.T) {
 					branchesAddress, "branches.0.protected", "true",
 				),
 				resource.TestCheckOutput("null_parent_ids", ""),
+				resource.TestCheckOutput("null_parent_lsn_ids", ""),
 				resource.TestCheckOutput("null_size_ids", ""),
 				resource.TestCheckOutput("null_primary_ids", ""),
 			),
@@ -151,6 +164,8 @@ func TestBranchesDataSource(t *testing.T) {
 				branchesTwoResponse,
 				regexp.MustCompile(`"name": "second",`).ReplaceAllString(branchesTwoResponse, `"name": "second",
       "parent_id": null,
+      "parent_lsn": null,
+      "parent_timestamp": null,
       "logical_size": null,
       "primary": null,`),
 			},
@@ -166,6 +181,15 @@ func TestBranchesDataSource(t *testing.T) {
 				),
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.0.parent_id", "",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.project_id", "response-project",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.parent_lsn", "",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.0.parent_timestamp", "0",
 				),
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.0.logical_size", "0",
@@ -185,7 +209,14 @@ func TestBranchesDataSource(t *testing.T) {
 				resource.TestCheckResourceAttr(
 					branchesAddress, "branches.1.name", "second",
 				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.1.project_id", "response-project",
+				),
+				resource.TestCheckResourceAttr(
+					branchesAddress, "branches.1.parent_timestamp", "0",
+				),
 				resource.TestCheckOutput("null_parent_ids", "br-second-456"),
+				resource.TestCheckOutput("null_parent_lsn_ids", "br-second-456"),
 				resource.TestCheckOutput("null_size_ids", "br-second-456"),
 				resource.TestCheckOutput("null_primary_ids", "br-second-456"),
 				resource.TestCheckResourceAttr(
@@ -236,6 +267,7 @@ func TestBranchesDataSource(t *testing.T) {
 							if attribute.Name != "branches" {
 								continue
 							}
+							require.Len(t, attribute.NestedType.Attributes, 10)
 							for _, field := range attribute.NestedType.Attributes {
 								require.True(t, field.Computed, field.Name)
 								require.False(t, field.Optional, field.Name)
@@ -698,6 +730,10 @@ output "branch_count" {
 
 output "null_parent_ids" {
   value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.parent_id == null])
+}
+
+output "null_parent_lsn_ids" {
+  value = join(",", [for branch in data.neon_branches.this.branches : branch.id if branch.parent_lsn == null])
 }
 
 output "null_size_ids" {

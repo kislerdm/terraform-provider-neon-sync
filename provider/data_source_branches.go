@@ -18,20 +18,10 @@ type neonBranchesDataSource struct {
 }
 
 type neonBranchesDataSourceModel struct {
-	ID        types.String  `tfsdk:"id"`
-	ProjectID types.String  `tfsdk:"project_id"`
-	Filter    types.String  `tfsdk:"filter"`
-	Branches  []branchModel `tfsdk:"branches"`
-}
-
-type branchModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	ParentID    types.String `tfsdk:"parent_id"`
-	LogicalSize types.Int64  `tfsdk:"logical_size"`
-	Primary     types.Bool   `tfsdk:"primary"`
-	Default     types.Bool   `tfsdk:"default"`
-	Protected   types.Bool   `tfsdk:"protected"`
+	ID        types.String              `tfsdk:"id"`
+	ProjectID types.String              `tfsdk:"project_id"`
+	Filter    types.String              `tfsdk:"filter"`
+	Branches  []neonBranchResourceModel `tfsdk:"branches"`
 }
 
 func NewBranchesDataSource() datasource.DataSource {
@@ -67,6 +57,10 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 							Computed:    true,
 							Description: "Branch ID.",
 						},
+						"project_id": schema.StringAttribute{
+							Computed:    true,
+							Description: "Project ID.",
+						},
 						"name": schema.StringAttribute{
 							Computed:    true,
 							Description: "Branch name.",
@@ -74,6 +68,14 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 						"parent_id": schema.StringAttribute{
 							Computed:    true,
 							Description: "Parent branch ID.",
+						},
+						"parent_lsn": schema.StringAttribute{
+							Computed:    true,
+							Description: "Parent branch Log Sequence Number (LSN).",
+						},
+						"parent_timestamp": schema.Int64Attribute{
+							Computed:    true,
+							Description: "Parent branch point-in-time timestamp in Unix seconds. Zero when not provided by the API.",
 						},
 						"logical_size": schema.Int64Attribute{
 							Computed:    true,
@@ -132,7 +134,7 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		value := url.QueryEscape(data.Filter.ValueString())
 		search = &value
 	}
-	data.Branches = make([]branchModel, 0)
+	data.Branches = make([]neonBranchResourceModel, 0)
 	var cursor *string
 	sortBy := neon.ListProjectBranchesSortByName
 	sortOrder := neon.SortOrderParamAsc
@@ -154,15 +156,9 @@ func (d *neonBranchesDataSource) Read(ctx context.Context, req datasource.ReadRe
 		}
 
 		for _, branch := range result.Branches {
-			data.Branches = append(data.Branches, branchModel{
-				ID:          types.StringValue(branch.ID),
-				Name:        types.StringValue(branch.Name),
-				ParentID:    types.StringPointerValue(branch.ParentID),
-				LogicalSize: types.Int64PointerValue(branch.LogicalSize),
-				Primary:     types.BoolPointerValue(branch.Primary),
-				Default:     types.BoolValue(branch.Default),
-				Protected:   types.BoolValue(branch.Protected),
-			})
+			var model neonBranchResourceModel
+			model.inferAttr(branch)
+			data.Branches = append(data.Branches, model)
 		}
 
 		cursor = nil
