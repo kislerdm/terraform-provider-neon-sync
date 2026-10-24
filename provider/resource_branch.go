@@ -34,6 +34,8 @@ type neonBranchResourceModel struct {
 	ParentTimestamp typesTFSDK.Int64  `tfsdk:"parent_timestamp"`
 	LogicalSize     typesTFSDK.Int64  `tfsdk:"logical_size"`
 	Protected       typesTFSDK.Bool   `tfsdk:"protected"`
+	Primary         typesTFSDK.Bool   `tfsdk:"primary"`
+	Default         typesTFSDK.Bool   `tfsdk:"default"`
 	// TODO: add annotations as map[string]any
 }
 
@@ -50,6 +52,8 @@ func (v *neonBranchResourceModel) inferAttr(branch neon.Branch) {
 	v.ParentTimestamp = typesTFSDK.Int64Value(parentTimestamp)
 	v.Protected = typesTFSDK.BoolValue(branch.Protected)
 	v.LogicalSize = typesTFSDK.Int64PointerValue(branch.LogicalSize)
+	v.Primary = typesTFSDK.BoolPointerValue(branch.Primary)
+	v.Default = typesTFSDK.BoolValue(branch.Default)
 }
 
 func NewNeonBranchResource() resource.Resource {
@@ -108,6 +112,15 @@ See details: https://neon.tech/docs/reference/glossary/#lsn
 				Optional:    true,
 				Computed:    true,
 				Description: "Set whether the branch is protected.",
+			},
+			"primary": schemaTFSDK.BoolAttribute{
+				Computed:           true,
+				Description:        "Primary branch flag.",
+				DeprecationMessage: "Use default instead.",
+			},
+			"default": schemaTFSDK.BoolAttribute{
+				Computed:    true,
+				Description: "Default branch flag.",
 			},
 		},
 	}
