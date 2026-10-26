@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -598,9 +599,79 @@ func TestProject(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assert.Equal(t, *resp.Project.OrgID, r.Primary.Attributes["org_id"])
 		assert.Equal(t, resp.Project.RegionID, r.Primary.Attributes["region_id"])
+		assert.Equal(t, *resp.Project.OrgID, r.Primary.Attributes["org_id"])
+		assert.Equal(t, resp.Project.Name, r.Primary.Attributes["name"])
 		assert.Equal(t, fmt.Sprintf("%d", resp.Project.PgVersion), r.Primary.Attributes["pg_version"])
+		assert.EqualValues(t, resp.Project.Provisioner, r.Primary.Attributes["compute_provisioner"])
+		assert.Equal(t, fmt.Sprintf("%v", resp.Project.StorePasswords), r.Primary.Attributes["store_password"])
+
+		settings := resp.Project.Settings
+		if settings != nil {
+			if settings.EnableLogicalReplication != nil {
+				assert.Equal(t, fmt.Sprintf("%v", *settings.EnableLogicalReplication),
+					r.Primary.Attributes["enable_logical_replication"])
+			}
+
+			if settings.BlockPublicConnections != nil {
+				assert.Equal(t, fmt.Sprintf("%v", *settings.BlockPublicConnections),
+					r.Primary.Attributes["block_public_connections"])
+			}
+
+			if settings.BlockVpcConnections != nil {
+				assert.Equal(t, fmt.Sprintf("%v", *settings.BlockVpcConnections), r.Primary.Attributes["block_vpc_connections"])
+			}
+
+			if settings.Hipaa != nil {
+				assert.Equal(t, fmt.Sprintf("%v", *settings.Hipaa), r.Primary.Attributes["hipaa"])
+			}
+
+			if settings.PreloadLibraries != nil {
+				if len(settings.PreloadLibraries.EnabledLibraries) > 0 {
+					assert.Equal(t, fmt.Sprintf("%d", len(settings.PreloadLibraries.EnabledLibraries)),
+						r.Primary.Attributes["enabled_libraries.#"])
+				} else {
+					assert.Empty(t, r.Primary.Attributes["enabled_libraries.#"])
+				}
+
+				if settings.PreloadLibraries.UseDefaults != nil {
+					assert.Equal(t, fmt.Sprintf("%v", *settings.PreloadLibraries.UseDefaults),
+						r.Primary.Attributes["enabled_libraries_use_defaults"])
+				}
+			} else {
+				assert.Equal(t, "", r.Primary.Attributes["enabled_libraries"])
+				assert.Equal(t, "", r.Primary.Attributes["enabled_libraries_use_defaults"])
+			}
+
+			if settings.AllowedIps != nil {
+				if len(settings.AllowedIps.Ips) > 0 {
+					assert.Equal(t, fmt.Sprintf("%d", len(settings.AllowedIps.Ips)),
+						r.Primary.Attributes["allowed_ips.#"])
+				} else {
+					assert.Empty(t, r.Primary.Attributes["allowed_ips.#"])
+				}
+
+				if settings.AllowedIps.ProtectedBranchesOnly != nil {
+					assert.Equal(t, fmt.Sprintf("%v", *settings.AllowedIps.ProtectedBranchesOnly),
+						r.Primary.Attributes["allowed_ips_protected_branches_only"])
+				}
+			} else {
+				assert.Equal(t, "", r.Primary.Attributes["allowed_ips"])
+				assert.Equal(t, "", r.Primary.Attributes["allowed_ips_protected_branches_only"])
+			}
+
+			if settings.MaintenanceWindow != nil {
+				assert.Equal(t, settings.MaintenanceWindow.StartTime, r.Primary.Attributes["maintenance_window.start_time"])
+				assert.Equal(t, settings.MaintenanceWindow.EndTime, r.Primary.Attributes["maintenance_window.end_time"])
+				assert.Equal(t, fmt.Sprintf("%v", len(settings.MaintenanceWindow.Weekdays)),
+					r.Primary.Attributes["maintenance_window.weekdays.#"])
+				for i, weekday := range settings.MaintenanceWindow.Weekdays {
+					assert.Equal(t, fmt.Sprintf("%v", weekday),
+						r.Primary.Attributes[fmt.Sprintf("maintenance_window.weekdays.%d", i)])
+				}
+			}
+		}
+
 		return nil
 	}
 
@@ -617,18 +688,13 @@ func TestProject(t *testing.T) {
 							resource.TestCheckResourceAttrSet("neon_project.this", "name"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "region_id"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "pg_version"),
-							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_id"),
-							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_protected"),
-							resource.TestCheckResourceAttrSet("neon_project.this", "default_endpoint_id"),
-							resource.TestCheckResourceAttrSet("neon_project.this", "database_host"),
-							resource.TestCheckResourceAttrSet("neon_project.this", "database_host_pooler"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "history_retention_seconds"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "database_name"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "database_user"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "autoscaling_limit_min_cu"),
 							resource.TestCheckResourceAttrSet("neon_project.this", "autoscaling_limit_max_cu"),
-
 							resource.TestCheckResourceAttr("neon_project.this", "hipaa", "false"),
+
 							resource.TestCheckResourceAttr("neon_project.this", "enable_logical_replication",
 								"false"),
 							resource.TestCheckResourceAttr("neon_project.this", "block_public_connections",
@@ -639,25 +705,96 @@ func TestProject(t *testing.T) {
 								"false"),
 							resource.TestCheckResourceAttr("neon_project.this", "store_password",
 								"true"),
-
 							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.#", "0"),
 
 							resource.TestCheckResourceAttr("neon_project.this", "enabled_libraries.#", "0"),
-							resource.TestCheckNoResourceAttr("neon_project.this", "enabled_libraries_use_defaults"),
 
+							resource.TestCheckNoResourceAttr("neon_project.this", "enabled_libraries_use_defaults"),
 							resource.TestCheckResourceAttr("neon_project.this", "suspend_timeout_seconds", "0"),
+
 							resource.TestCheckResourceAttr("neon_project.this", "compute_provisioner", "k8s-neonvm"),
 
-							// no blocks shall be present in the state
-							resource.TestCheckNoResourceAttr("neon_project.this", "primary_compute"),
-							resource.TestCheckNoResourceAttr("neon_project.this", "branch"),
-							resource.TestCheckNoResourceAttr("neon_project.this", "maintenance_window"),
-							resource.TestCheckNoResourceAttr("neon_project.this", "quota"),
+							// block attrs.
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.%", "3"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "maintenance_window.start_time"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "maintenance_window.end_time"),
+							resource.TestCheckResourceAttrWith("neon_project.this",
+								"maintenance_window.weekdays.#", func(s string) error {
+									v, err := strconv.Atoi(s)
+									if err != nil {
+										return err
+									}
+									if v == 0 {
+										return fmt.Errorf("expected non empty maintenance_window.weekdays")
+									}
+									return nil
+								}),
 
-							// TODO: remove after off. release
-							resource.TestCheckResourceAttr("neon_project.this", "connection_uri", ""),
-							resource.TestCheckResourceAttr("neon_project.this", "connection_uri_pooler", ""),
-							resource.TestCheckResourceAttr("neon_project.this", "database_password", ""),
+							resource.TestCheckResourceAttr("neon_project.this", "quota.%", "5"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "branch.%",
+								fmt.Sprintf("%d", len(branchSchemaAttributes))),
+							resource.TestCheckResourceAttrPair("neon_project.this", "branch.project_id",
+								"neon_project.this", "id"),
+							resource.TestCheckResourceAttr("neon_project.this", "branch.protected", "false"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_id"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_protected"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrPair("neon_project.this", "branch.id",
+								"neon_project.this", "default_branch_id"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrPair("neon_project.this", "branch.protected",
+								"neon_project.this", "default_branch_protected"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "primary_compute.%",
+								fmt.Sprintf("%d", len(endpointSchemaAttributes))),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.project_id",
+								"neon_project.this", "id"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.region_id",
+								"neon_project.this", "region_id"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.branch_id",
+								"neon_project.this", "branch.id"),
+							resource.TestCheckResourceAttr("neon_project.this", "primary_compute.type", "read_write"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.autoscaling_limit_min_cu",
+								"neon_project.this", "autoscaling_limit_min_cu"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.autoscaling_limit_max_cu",
+								"neon_project.this", "autoscaling_limit_max_cu"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.suspend_timeout_seconds",
+								"neon_project.this", "suspend_timeout_seconds"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.compute_provisioner",
+								"neon_project.this", "compute_provisioner"),
+							resource.TestCheckResourceAttr("neon_project.this", "primary_compute.disabled", "false"),
+							resource.TestCheckResourceAttr("neon_project.this", "primary_compute.passwordless_access", "true"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.enabled_libraries",
+								"neon_project.this", "enabled_libraries"),
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.enabled_libraries_use_defaults",
+								"neon_project.this", "enabled_libraries_use_defaults"),
+
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_endpoint_id"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.id",
+								"neon_project.this", "default_endpoint_id"),
+
+							// TODO: remove after off. release: it's present for BW compatibility reasons only
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_host"),
+							// TODO: remove after off. release: database_host is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.host",
+								"neon_project.this", "database_host"),
+							// TODO: remove after off. release: it's present for BW compatibility reasons only
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_host_pooler"),
+							// TODO: remove after off. release: database_host_pooler is present for BW compatibility reasons only
+							resource.TestCheckResourceAttrPair("neon_project.this", "primary_compute.host_pooler",
+								"neon_project.this", "database_host_pooler"),
+
+							// verify removal of the attributes that are present in v0.18.0
+							resource.TestCheckNoResourceAttr("neon_project.this", "connection_uri"),
+							// verify removal of the attributes that are present in v0.18.0
+							resource.TestCheckNoResourceAttr("neon_project.this", "connection_uri_pooler"),
+							// verify removal of the attributes that are present in v0.18.0
+							resource.TestCheckNoResourceAttr("neon_project.this", "database_password"),
 							verify,
 						),
 					},

@@ -114,19 +114,16 @@ type neonProjectResourceModel struct {
 	Branch            *neonBranchResourceModel   `tfsdk:"branch"`
 	PrimaryCompute    *neonEndpointResourceModel `tfsdk:"primary_compute"`
 
-	DefaultBranchID        types.String `tfsdk:"default_branch_id"`
-	DefaultBranchProtected types.Bool   `tfsdk:"default_branch_protected"`
-	DefaultEndpointID      types.String `tfsdk:"default_endpoint_id"`
-	DatabaseHost           types.String `tfsdk:"database_host"`
-	DatabaseHostPooler     types.String `tfsdk:"database_host_pooler"`
-
-	// TODO: delete after the off. release
-	ConnectionURI types.String `tfsdk:"connection_uri"`
-	// TODO: delete after the off. release
-	ConnectionURIPooler types.String `tfsdk:"connection_uri_pooler"`
-	// TODO: delete after the off. release
-	DatabasePassword types.String `tfsdk:"database_password"`
-
+	// TODO: delete after the off. release: it's here for BW compatibility only
+	DefaultBranchID types.String `tfsdk:"default_branch_id"`
+	// TODO: delete after the off. release: it's here for BW compatibility only
+	DefaultBranchProtected types.Bool `tfsdk:"default_branch_protected"`
+	// TODO: delete after the off. release: it's here for BW compatibility only
+	DefaultEndpointID types.String `tfsdk:"default_endpoint_id"`
+	// TODO: delete after the off. release: it's here for BW compatibility only
+	DatabaseHost types.String `tfsdk:"database_host"`
+	// TODO: delete after the off. release: it's here for BW compatibility only
+	DatabaseHostPooler types.String `tfsdk:"database_host_pooler"`
 	// 	TODO: add pgSettings (?) verify for bug in API behaviour
 }
 
@@ -152,6 +149,8 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 
 	v.EnabledLibraries = types.ListNull(types.StringType)
 	v.EnabledLibrariesUseDefaults = types.BoolNull()
+
+	initializeProjectBlocks(v)
 
 	if project.Settings != nil {
 		settings := project.Settings
@@ -189,7 +188,7 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 			}
 		}
 
-		if v.MaintenanceWindow != nil && settings.MaintenanceWindow != nil {
+		if v.MaintenanceWindow != nil {
 			v.MaintenanceWindow = &maintenanceWindow{
 				StartTime: types.StringValue(settings.MaintenanceWindow.StartTime),
 				EndTime:   types.StringValue(settings.MaintenanceWindow.EndTime),
@@ -220,49 +219,37 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 		}
 	}
 
-	if v.Branch != nil {
-		v.Branch.inferAttr(branch)
-	}
+	v.Branch = &neonBranchResourceModel{}
+	v.Branch.inferAttr(branch)
+	v.DefaultBranchID = v.Branch.ID
+	v.DefaultBranchProtected = v.Branch.Protected
 
-	branchState := neonBranchResourceModel{}
-	branchState.inferAttr(branch)
-	if v.Branch != nil {
-		*v.Branch = branchState
-	}
-
-	if v.PrimaryCompute != nil {
-		v.PrimaryCompute.inferAttr(ctx, endpoint, diagnostics)
-	}
-	v.DefaultBranchID = branchState.ID
-	v.DefaultBranchProtected = branchState.Protected
-	if v.Branch != nil {
-		v.DefaultBranchID = v.Branch.ID
-		v.DefaultBranchProtected = v.Branch.Protected
-	}
-
-	endpointState := neonEndpointResourceModel{}
-	endpointState.inferAttr(ctx, endpoint, diagnostics)
-	if v.PrimaryCompute != nil {
-		*v.PrimaryCompute = endpointState
-	}
-
-	v.DefaultEndpointID = endpointState.ID
-	v.DatabaseHost = endpointState.Host
-	v.DatabaseHostPooler = endpointState.HostPooler
-	if v.PrimaryCompute != nil {
-		v.DefaultEndpointID = v.PrimaryCompute.ID
-		v.DatabaseHost = v.PrimaryCompute.Host
-		v.DatabaseHostPooler = v.PrimaryCompute.HostPooler
-	}
+	v.PrimaryCompute = &neonEndpointResourceModel{}
+	v.PrimaryCompute.inferAttr(ctx, endpoint, diagnostics)
+	v.DefaultEndpointID = v.PrimaryCompute.ID
+	v.DatabaseHost = v.PrimaryCompute.Host
+	v.DatabaseHostPooler = v.PrimaryCompute.HostPooler
 
 	v.DatabaseName = types.StringValue(database.Name)
 	v.DatabaseUser = types.StringValue(database.OwnerName)
+}
 
-	// TODO: delete after off release
-	{
-		v.DatabasePassword = types.StringValue("")
-		v.ConnectionURI = types.StringValue("")
-		v.ConnectionURIPooler = types.StringValue("")
+func initializeProjectBlocks(state *neonProjectResourceModel) {
+	if state.MaintenanceWindow == nil {
+		state.MaintenanceWindow = &maintenanceWindow{
+			Weekdays: types.ListNull(types.Int32Type),
+		}
+	}
+	if state.Quota == nil {
+		state.Quota = &projectQuota{}
+	}
+	if state.Branch == nil {
+		state.Branch = &neonBranchResourceModel{}
+	}
+	if state.PrimaryCompute == nil {
+		state.PrimaryCompute = &neonEndpointResourceModel{
+			EnabledLibraries: types.ListNull(types.StringType),
+		}
 	}
 }
 
@@ -348,25 +335,6 @@ type neonProjectResource struct {
 	client *neon.Client
 }
 
-func initializeProjectBlocks(state *neonProjectResourceModel) {
-	if state.MaintenanceWindow == nil {
-		state.MaintenanceWindow = &maintenanceWindow{
-			Weekdays: types.ListNull(types.Int32Type),
-		}
-	}
-	if state.Quota == nil {
-		state.Quota = &projectQuota{}
-	}
-	if state.Branch == nil {
-		state.Branch = &neonBranchResourceModel{}
-	}
-	if state.PrimaryCompute == nil {
-		state.PrimaryCompute = &neonEndpointResourceModel{
-			EnabledLibraries: types.ListNull(types.StringType),
-		}
-	}
-}
-
 func (r neonProjectResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = "neon_project"
 }
@@ -389,7 +357,7 @@ func (r *neonProjectResource) Configure(_ context.Context, req resource.Configur
 }
 
 func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	atts := map[string]schema.Attribute{
+	attrs := map[string]schema.Attribute{
 		"id": schema.StringAttribute{
 			Description: "Project ID.",
 			Computed:    true,
@@ -537,32 +505,6 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		},
 	}
 
-	// TODO: delete after the off. release
-	attrToDeleteAfterOffRelease := map[string]schema.Attribute{
-		"database_password": schema.StringAttribute{
-			Description:        "The password for the default database user.",
-			DeprecationMessage: "The attribute is always empty, use the ephemeral resource `neon_role` instead.",
-			Computed:           true,
-			Sensitive:          true,
-			Default:            stringdefault.StaticString(""),
-		},
-		"connection_uri": schema.StringAttribute{
-			Description:        "Default connection uri.",
-			DeprecationMessage: "The attribute is always empty, use the ephemeral resource `neon_connection_uri` instead.",
-			Computed:           true,
-			Sensitive:          true,
-			Default:            stringdefault.StaticString(""),
-		},
-		"connection_uri_pooler": schema.StringAttribute{
-			Description:        "Default connection uri with the traffic through the connection pool (pgbouncer).",
-			DeprecationMessage: "The attribute is always empty, use the ephemeral resource `neon_connection_uri` instead.",
-			Computed:           true,
-			Sensitive:          true,
-			Default:            stringdefault.StaticString(""),
-		},
-	}
-	maps.Copy(atts, attrToDeleteAfterOffRelease)
-
 	projectEndpointSchemaAttributes := maps.Clone(endpointSchemaAttributes)
 
 	// redefine some of the endpoint's attributes to be read-only
@@ -581,6 +523,75 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		}
 	}
 
+	blocks := map[string]schema.Attribute{
+		"branch": schema.SingleNestedAttribute{
+			Description: "Main branch provisioned with the project.",
+			Optional:    true,
+			Computed:    true,
+			Attributes:  projectBranchSchemaAttributes,
+		},
+		"primary_compute": schema.SingleNestedAttribute{
+			Description: "Primary read-write compute resource provisioned with the project.",
+			Optional:    true,
+			Computed:    true,
+			Attributes:  projectEndpointSchemaAttributes,
+		},
+		"quota": schema.SingleNestedAttribute{
+			Description: "Per-project consumption quota. If the quota is exceeded, all active computes\nare automatically suspended and it will not be possible to start them with\nan API method call or incoming proxy connections. The only exception is\nlogical_size_bytes, which is applied on per-branch basis, i.e., only the\ncompute on the branch that exceeds the logical_size quota will be suspended.\n\nQuotas are enforced based on per-project consumption metrics with the same names,\nwhich are reset at the end of each billing period (the first day of the month).\nLogical size is also an exception in this case, as it represents the total size\nof data stored in a branch, so it is not reset.\n\nThe zero value per attributed means 'unlimited'.",
+			Optional:    true,
+			Computed:    true,
+			Attributes: map[string]schema.Attribute{
+				"active_time_seconds": schema.Int64Attribute{
+					Description: "The total amount of wall-clock time allowed to be spent by the project's compute endpoints.",
+					Optional:    true,
+					Computed:    true,
+				},
+				"compute_time_seconds": schema.Int64Attribute{
+					Description: "The total amount of CPU seconds allowed to be spent by the project's compute endpoints.",
+					Optional:    true,
+					Computed:    true,
+				},
+				"written_data_bytes": schema.Int64Attribute{
+					Description: "Total amount of data written to all of a project's branches.",
+					Optional:    true,
+					Computed:    true,
+				},
+				"data_transfer_bytes": schema.Int64Attribute{
+					Description: "Total amount of data transferred from all of a project's branches using the proxy.",
+					Optional:    true,
+					Computed:    true,
+				},
+				"logical_size_bytes": schema.Int64Attribute{
+					Description: "Limit on the logical size of every project's branch.",
+					Optional:    true,
+					Computed:    true,
+				},
+			},
+		},
+		"maintenance_window": schema.SingleNestedAttribute{
+			Description: "A time period during which Neon may perform maintenance on the project's infrastructure. During this time, the project's compute endpoints may be unavailable and existing connections can be interrupted.",
+			Optional:    true,
+			Computed:    true,
+			Validators:  []validator.Object{&validatorMaintenanceWindow{}},
+			Attributes: map[string]schema.Attribute{
+				"weekdays": schema.ListAttribute{
+					Description: "A list of weekdays when the maintenance window is active. Encoded as ints, where 1 - Monday, and 7 - Sunday.",
+					ElementType: types.Int32Type,
+					Computed:    true,
+				},
+				"start_time": schema.StringAttribute{
+					Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+					Computed:    true,
+				},
+				"end_time": schema.StringAttribute{
+					Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+					Computed:    true,
+				},
+			},
+		},
+	}
+	maps.Copy(attrs, blocks)
+
 	resp.Schema = schema.Schema{
 		Description: `Neon Project.
 
@@ -592,66 +603,7 @@ Note that this resource manages five resources:
 - Default database: https://neon.com/docs/reference/glossary#database
 - Default role: https://neon.com/docs/reference/glossary#postgres-role
 `,
-		Attributes: atts,
-		Blocks: map[string]schema.Block{
-			"branch": schema.SingleNestedBlock{
-				Description: "Main branch provisioned with the project.",
-				Attributes:  projectBranchSchemaAttributes,
-			},
-			"primary_compute": schema.SingleNestedBlock{
-				Description: "Primary read-write compute resource provisioned with the project.",
-				Attributes:  projectEndpointSchemaAttributes,
-			},
-			"quota": schema.SingleNestedBlock{
-				Description: "Per-project consumption quota. If the quota is exceeded, all active computes\nare automatically suspended and it will not be possible to start them with\nan API method call or incoming proxy connections. The only exception is\nlogical_size_bytes, which is applied on per-branch basis, i.e., only the\ncompute on the branch that exceeds the logical_size quota will be suspended.\n\nQuotas are enforced based on per-project consumption metrics with the same names,\nwhich are reset at the end of each billing period (the first day of the month).\nLogical size is also an exception in this case, as it represents the total size\nof data stored in a branch, so it is not reset.\n\nThe zero value per attributed means 'unlimited'.",
-				Attributes: map[string]schema.Attribute{
-					"active_time_seconds": schema.Int64Attribute{
-						Description: "The total amount of wall-clock time allowed to be spent by the project's compute endpoints.",
-						Optional:    true,
-						Computed:    true,
-					},
-					"compute_time_seconds": schema.Int64Attribute{
-						Description: "The total amount of CPU seconds allowed to be spent by the project's compute endpoints.",
-						Optional:    true,
-						Computed:    true,
-					},
-					"written_data_bytes": schema.Int64Attribute{
-						Description: "Total amount of data written to all of a project's branches.",
-						Optional:    true,
-						Computed:    true,
-					},
-					"data_transfer_bytes": schema.Int64Attribute{
-						Description: "Total amount of data transferred from all of a project's branches using the proxy.",
-						Optional:    true,
-						Computed:    true,
-					},
-					"logical_size_bytes": schema.Int64Attribute{
-						Description: "Limit on the logical size of every project's branch.",
-						Optional:    true,
-						Computed:    true,
-					},
-				},
-			},
-			"maintenance_window": schema.SingleNestedBlock{
-				Description: "A time period during which Neon may perform maintenance on the project's infrastructure. During this time, the project's compute endpoints may be unavailable and existing connections can be interrupted.",
-				Validators:  []validator.Object{&validatorMaintenanceWindow{}},
-				Attributes: map[string]schema.Attribute{
-					"weekdays": schema.ListAttribute{
-						Description: "A list of weekdays when the maintenance window is active. Encoded as ints, where 1 - Monday, and 7 - Sunday.",
-						ElementType: types.Int32Type,
-						Computed:    true,
-					},
-					"start_time": schema.StringAttribute{
-						Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-						Computed:    true,
-					},
-					"end_time": schema.StringAttribute{
-						Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-						Computed:    true,
-					},
-				},
-			},
-		},
+		Attributes: attrs,
 	}
 }
 
