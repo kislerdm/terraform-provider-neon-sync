@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
@@ -108,27 +109,23 @@ type neonProjectResourceModel struct {
 
 	Hipaa types.Bool `tfsdk:"hipaa"`
 
-	MaintenanceWindow maintenanceWindow         `tfsdk:"maintenance_window"`
-	Quota             projectQuota              `tfsdk:"quota"`
-	Branch            neonBranchResourceModel   `tfsdk:"branch"`
-	PrimaryCompute    neonEndpointResourceModel `tfsdk:"primary_compute"`
+	MaintenanceWindow *maintenanceWindow         `tfsdk:"maintenance_window"`
+	Quota             *projectQuota              `tfsdk:"quota"`
+	Branch            *neonBranchResourceModel   `tfsdk:"branch"`
+	PrimaryCompute    *neonEndpointResourceModel `tfsdk:"primary_compute"`
 
-	// TODO: delete after the off. release
-	DefaultBranchID types.String `tfsdk:"default_branch_id"`
-	// TODO: delete after the off. release
-	DefaultEndpointID types.String `tfsdk:"default_endpoint_id"`
-	// TODO: delete after the off. release
-	DefaultBranchProtected types.Bool `tfsdk:"default_branch_protected"`
+	DefaultBranchID        types.String `tfsdk:"default_branch_id"`
+	DefaultBranchProtected types.Bool   `tfsdk:"default_branch_protected"`
+	DefaultEndpointID      types.String `tfsdk:"default_endpoint_id"`
+	DatabaseHost           types.String `tfsdk:"database_host"`
+	DatabaseHostPooler     types.String `tfsdk:"database_host_pooler"`
+
 	// TODO: delete after the off. release
 	ConnectionURI types.String `tfsdk:"connection_uri"`
 	// TODO: delete after the off. release
 	ConnectionURIPooler types.String `tfsdk:"connection_uri_pooler"`
 	// TODO: delete after the off. release
 	DatabasePassword types.String `tfsdk:"database_password"`
-	// TODO: delete after the off. release
-	DatabaseHost types.String `tfsdk:"database_host"`
-	// TODO: delete after the off. release
-	DatabaseHostPooler types.String `tfsdk:"database_host_pooler"`
 
 	// 	TODO: add pgSettings (?) verify for bug in API behaviour
 }
@@ -144,23 +141,17 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 	v.StorePassword = types.BoolValue(project.StorePasswords)
 	v.HistoryRetentionSeconds = types.Int32Value(project.HistoryRetentionSeconds)
 
-	v.EnableLogicalReplication = types.BoolUnknown()
-	v.BlockPublicConnections = types.BoolUnknown()
-	v.BlockVPCConnections = types.BoolUnknown()
-	v.EnableLogicalReplication = types.BoolUnknown()
-	v.Hipaa = types.BoolUnknown()
+	v.EnableLogicalReplication = types.BoolNull()
+	v.BlockPublicConnections = types.BoolNull()
+	v.BlockVPCConnections = types.BoolNull()
+	v.EnableLogicalReplication = types.BoolNull()
+	v.Hipaa = types.BoolNull()
 
-	v.AllowedIPsProtectedBranchesOnly = types.BoolUnknown()
-	v.AllowedIPs = types.ListUnknown(types.StringType)
+	v.AllowedIPsProtectedBranchesOnly = types.BoolNull()
+	v.AllowedIPs = types.ListNull(types.StringType)
 
-	v.Quota.ActiveTimeSeconds = types.Int64Unknown()
-	v.Quota.ComputeTimeSeconds = types.Int64Unknown()
-	v.Quota.DataTransferBytes = types.Int64Unknown()
-	v.Quota.LogicalSizeBytes = types.Int64Unknown()
-	v.Quota.WrittenDataBytes = types.Int64Unknown()
-
-	v.EnabledLibraries = types.ListUnknown(types.StringType)
-	v.EnabledLibrariesUseDefaults = types.BoolUnknown()
+	v.EnabledLibraries = types.ListNull(types.StringType)
+	v.EnabledLibrariesUseDefaults = types.BoolNull()
 
 	if project.Settings != nil {
 		settings := project.Settings
@@ -174,37 +165,48 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 		var d diag.Diagnostics
 		if settings.AllowedIps != nil {
 			v.AllowedIPsProtectedBranchesOnly = types.BoolPointerValue(settings.AllowedIps.ProtectedBranchesOnly)
-			v.AllowedIPs, d = types.ListValueFrom(ctx, types.StringType, settings.AllowedIps.Ips)
-			diagnostics.Append(d...)
+			if len(settings.AllowedIps.Ips) > 0 {
+				v.AllowedIPs, d = types.ListValueFrom(ctx, types.StringType, settings.AllowedIps.Ips)
+				diagnostics.Append(d...)
+			}
 		}
 
-		if settings.Quota != nil {
-			v.Quota.ActiveTimeSeconds = types.Int64PointerValue(settings.Quota.ActiveTimeSeconds)
-			v.Quota.ComputeTimeSeconds = types.Int64PointerValue(settings.Quota.ComputeTimeSeconds)
-			v.Quota.DataTransferBytes = types.Int64PointerValue(settings.Quota.DataTransferBytes)
-			v.Quota.LogicalSizeBytes = types.Int64PointerValue(settings.Quota.LogicalSizeBytes)
-			v.Quota.WrittenDataBytes = types.Int64PointerValue(settings.Quota.WrittenDataBytes)
+		if v.Quota != nil && settings.Quota != nil {
+			v.Quota = &projectQuota{
+				ActiveTimeSeconds:  types.Int64PointerValue(settings.Quota.ActiveTimeSeconds),
+				ComputeTimeSeconds: types.Int64PointerValue(settings.Quota.ComputeTimeSeconds),
+				DataTransferBytes:  types.Int64PointerValue(settings.Quota.DataTransferBytes),
+				LogicalSizeBytes:   types.Int64PointerValue(settings.Quota.LogicalSizeBytes),
+				WrittenDataBytes:   types.Int64PointerValue(settings.Quota.WrittenDataBytes),
+			}
 		}
 
 		if settings.PreloadLibraries != nil {
-			v.EnabledLibraries, d = types.ListValueFrom(ctx, types.StringType, settings.PreloadLibraries.EnabledLibraries)
-			diagnostics.Append(d...)
 			v.EnabledLibrariesUseDefaults = types.BoolPointerValue(settings.PreloadLibraries.UseDefaults)
+			if len(settings.PreloadLibraries.EnabledLibraries) > 0 {
+				v.EnabledLibraries, d = types.ListValueFrom(ctx, types.StringType, settings.PreloadLibraries.EnabledLibraries)
+				diagnostics.Append(d...)
+			}
 		}
 
-		if settings.MaintenanceWindow != nil {
-			v.MaintenanceWindow = maintenanceWindow{
-				Weekdays:  settings.MaintenanceWindow.Weekdays,
+		if v.MaintenanceWindow != nil && settings.MaintenanceWindow != nil {
+			v.MaintenanceWindow = &maintenanceWindow{
 				StartTime: types.StringValue(settings.MaintenanceWindow.StartTime),
 				EndTime:   types.StringValue(settings.MaintenanceWindow.EndTime),
 			}
+			weekdays := make([]int32, len(settings.MaintenanceWindow.Weekdays))
+			for i, weekday := range settings.MaintenanceWindow.Weekdays {
+				weekdays[i] = int32(weekday)
+			}
+			v.MaintenanceWindow.Weekdays, d = types.ListValueFrom(ctx, types.Int32Type, weekdays)
+			diagnostics.Append(d...)
 		}
 	}
 
 	// default compute a/k/a endpoints settings
-	v.AutoscalingLimitMinCU = types.Float64Unknown()
-	v.AutoscalingLimitMaxCU = types.Float64Unknown()
-	v.SuspendTimeoutSeconds = types.Int64Unknown()
+	v.AutoscalingLimitMinCU = types.Float64Null()
+	v.AutoscalingLimitMaxCU = types.Float64Null()
+	v.SuspendTimeoutSeconds = types.Int64Null()
 	if project.DefaultEndpointSettings != nil {
 		settings := project.DefaultEndpointSettings
 		if settings.AutoscalingLimitMaxCu != nil {
@@ -218,42 +220,76 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 		}
 	}
 
-	v.Branch.inferAttr(branch)
-	v.PrimaryCompute.inferAttr(ctx, endpoint, diagnostics)
+	if v.Branch != nil {
+		v.Branch.inferAttr(branch)
+	}
 
-	v.DatabaseName = types.StringValue(database.Name)
-	v.DatabaseUser = types.StringValue(database.OwnerName)
+	branchState := neonBranchResourceModel{}
+	branchState.inferAttr(branch)
+	if v.Branch != nil {
+		*v.Branch = branchState
+	}
 
-	// TODO: remove after the off. release
-	{
+	if v.PrimaryCompute != nil {
+		v.PrimaryCompute.inferAttr(ctx, endpoint, diagnostics)
+	}
+	v.DefaultBranchID = branchState.ID
+	v.DefaultBranchProtected = branchState.Protected
+	if v.Branch != nil {
 		v.DefaultBranchID = v.Branch.ID
 		v.DefaultBranchProtected = v.Branch.Protected
+	}
+
+	endpointState := neonEndpointResourceModel{}
+	endpointState.inferAttr(ctx, endpoint, diagnostics)
+	if v.PrimaryCompute != nil {
+		*v.PrimaryCompute = endpointState
+	}
+
+	v.DefaultEndpointID = endpointState.ID
+	v.DatabaseHost = endpointState.Host
+	v.DatabaseHostPooler = endpointState.HostPooler
+	if v.PrimaryCompute != nil {
 		v.DefaultEndpointID = v.PrimaryCompute.ID
 		v.DatabaseHost = v.PrimaryCompute.Host
 		v.DatabaseHostPooler = v.PrimaryCompute.HostPooler
 	}
+
+	v.DatabaseName = types.StringValue(database.Name)
+	v.DatabaseUser = types.StringValue(database.OwnerName)
+
+	// TODO: delete after off release
+	{
+		v.DatabasePassword = types.StringValue("")
+		v.ConnectionURI = types.StringValue("")
+		v.ConnectionURIPooler = types.StringValue("")
+	}
 }
 
 type maintenanceWindow struct {
-	Weekdays  []int        `tfsdk:"weekdays"`
+	Weekdays  types.List   `tfsdk:"weekdays"`
 	StartTime types.String `tfsdk:"start_time"`
 	EndTime   types.String `tfsdk:"end_time"`
 }
 
 type validatorMaintenanceWindow struct{}
 
-func (v validatorMaintenanceWindow) Description(_ context.Context) string {
+func (v *validatorMaintenanceWindow) Description(_ context.Context) string {
 	return "Maintenance window's validator."
 }
 
-func (v validatorMaintenanceWindow) MarkdownDescription(ctx context.Context) string {
+func (v *validatorMaintenanceWindow) MarkdownDescription(ctx context.Context) string {
 	return v.Description(ctx)
 }
 
-func (v validatorMaintenanceWindow) ValidateObject(ctx context.Context, req validator.ObjectRequest,
+func (v *validatorMaintenanceWindow) ValidateObject(ctx context.Context, req validator.ObjectRequest,
 	resp *validator.ObjectResponse) {
-	var data neonProjectResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	var window maintenanceWindow
+	resp.Diagnostics.Append(req.ConfigValue.As(ctx, &window, basetypes.ObjectAsOptions{})...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -262,14 +298,21 @@ func (v validatorMaintenanceWindow) ValidateObject(ctx context.Context, req vali
 		_, err := time.Parse("15:04", s)
 		return err == nil
 	}
-
-	window := data.MaintenanceWindow
 	errMsg := "undefined maintenance window"
+	if window.Weekdays.IsNull() || window.Weekdays.IsUnknown() {
+		resp.Diagnostics.AddError(errMsg, "undefined weekdays, it must be a list of values between 1 and 7")
+	}
+	var weekdays []int32
+	resp.Diagnostics.Append(window.Weekdays.ElementsAs(ctx, &weekdays, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	switch {
-	case len(window.Weekdays) > 7 || len(window.Weekdays) < 1:
+	case len(weekdays) > 7 || len(weekdays) < 1:
 		resp.Diagnostics.AddError(errMsg, "invalid number of weekdays, it must be between 1 and 7")
 	default:
-		for j, weekday := range window.Weekdays {
+		for j, weekday := range weekdays {
 			switch weekday {
 			case 1, 2, 3, 4, 5, 6, 7:
 			default:
@@ -309,7 +352,7 @@ func (r neonProjectResource) Metadata(_ context.Context, req resource.MetadataRe
 	resp.TypeName = "neon_project"
 }
 
-func (r neonProjectResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *neonProjectResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -359,6 +402,7 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		"store_password": schema.BoolAttribute{
 			Description: "Whether or not passwords are stored for roles in the Neon project.\nStoring passwords facilitates access to Neon features that require authorization.",
 			Optional:    true,
+			Computed:    true,
 			Default:     booldefault.StaticBool(true),
 		},
 		"history_retention_seconds": schema.Int32Attribute{
@@ -421,6 +465,13 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			Computed:   true,
 			Validators: []validator.Int64{validateSuspendTimeout},
 		},
+		"compute_provisioner": schema.StringAttribute{
+			Description: "Project-wide compute provisioner. `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
+			Optional:    true,
+			Computed:    true,
+			Default:     stringdefault.StaticString("k8s-neonvm"),
+			Validators:  []validator.String{validateComputeProvisioner},
+		},
 		"hipaa": schema.BoolAttribute{
 			Description:   "Enable HIPAA compliance for the project.\nNote that HIPAA must be configured for the organization first.\n\n**Warning**: Once enabled, HIPAA cannot be disabled.",
 			Computed:      true,
@@ -438,10 +489,6 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			Optional:    true,
 			Computed:    true,
 		},
-	}
-
-	// TODO: delete after the off. release
-	attrToDeleteAfterOffRelease := map[string]schema.Attribute{
 		"default_branch_id": schema.StringAttribute{
 			Description:        "Default branch ID.",
 			DeprecationMessage: "Use the `id` attribute in the block `branch` instead.",
@@ -451,6 +498,7 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			Description:        "Set default branch as protected. **Note** that the default value is false.",
 			DeprecationMessage: "Use the `protected` attribute in the block `branch` instead.",
 			Optional:           true,
+			Computed:           true,
 			Default:            booldefault.StaticBool(false),
 		},
 		"default_endpoint_id": schema.StringAttribute{
@@ -468,6 +516,10 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			DeprecationMessage: "Use the `host_pooler` attribute in the block `primary_compute` instead.",
 			Computed:           true,
 		},
+	}
+
+	// TODO: delete after the off. release
+	attrToDeleteAfterOffRelease := map[string]schema.Attribute{
 		"database_password": schema.StringAttribute{
 			Description:        "The password for the default database user.",
 			DeprecationMessage: "The attribute is always empty, use the ephemeral resource `neon_role` instead.",
@@ -492,6 +544,24 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 	}
 	maps.Copy(atts, attrToDeleteAfterOffRelease)
 
+	projectEndpointSchemaAttributes := maps.Clone(endpointSchemaAttributes)
+
+	// redefine some of the endpoint's attributes to be read-only
+	for _, name := range []string{"project_id", "branch_id", "region_id", "type"} {
+		if _, ok := projectEndpointSchemaAttributes[name]; ok {
+			projectEndpointSchemaAttributes[name] =
+				newReadOnlyResourceAttrFromResourceAttr(projectEndpointSchemaAttributes[name])
+		}
+	}
+
+	projectBranchSchemaAttributes := maps.Clone(branchSchemaAttributes)
+	for _, name := range []string{"project_id"} {
+		if _, ok := projectBranchSchemaAttributes[name]; ok {
+			projectBranchSchemaAttributes[name] =
+				newReadOnlyResourceAttrFromResourceAttr(projectBranchSchemaAttributes[name])
+		}
+	}
+
 	resp.Schema = schema.Schema{
 		Description: `Neon Project.
 
@@ -507,11 +577,11 @@ Note that this resource manages five resources:
 		Blocks: map[string]schema.Block{
 			"branch": schema.SingleNestedBlock{
 				Description: "Main branch provisioned with the project.",
-				Attributes:  branchSchemaAttributes,
+				Attributes:  projectBranchSchemaAttributes,
 			},
 			"primary_compute": schema.SingleNestedBlock{
 				Description: "Primary read-write compute resource provisioned with the project.",
-				Attributes:  endpointSchemaAttributes,
+				Attributes:  projectEndpointSchemaAttributes,
 			},
 			"quota": schema.SingleNestedBlock{
 				Description: "Per-project consumption quota. If the quota is exceeded, all active computes\nare automatically suspended and it will not be possible to start them with\nan API method call or incoming proxy connections. The only exception is\nlogical_size_bytes, which is applied on per-branch basis, i.e., only the\ncompute on the branch that exceeds the logical_size quota will be suspended.\n\nQuotas are enforced based on per-project consumption metrics with the same names,\nwhich are reset at the end of each billing period (the first day of the month).\nLogical size is also an exception in this case, as it represents the total size\nof data stored in a branch, so it is not reset.\n\nThe zero value per attributed means 'unlimited'.",
@@ -545,20 +615,20 @@ Note that this resource manages five resources:
 			},
 			"maintenance_window": schema.SingleNestedBlock{
 				Description: "A time period during which Neon may perform maintenance on the project's infrastructure. During this time, the project's compute endpoints may be unavailable and existing connections can be interrupted.",
-				Validators:  []validator.Object{validatorMaintenanceWindow{}},
+				Validators:  []validator.Object{&validatorMaintenanceWindow{}},
 				Attributes: map[string]schema.Attribute{
 					"weekdays": schema.ListAttribute{
 						Description: "A list of weekdays when the maintenance window is active. Encoded as ints, where 1 - Monday, and 7 - Sunday.",
-						Required:    true,
 						ElementType: types.Int32Type,
+						Computed:    true,
 					},
 					"start_time": schema.StringAttribute{
 						Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-						Required:    true,
+						Computed:    true,
 					},
 					"end_time": schema.StringAttribute{
 						Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-						Required:    true,
+						Computed:    true,
 					},
 				},
 			},
@@ -579,6 +649,10 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	var cfg neon.ProjectCreateRequest
+	if state.Name.ValueStringPointer() != nil && state.Name.ValueString() != "" {
+		cfg.Project.Name = state.Name.ValueStringPointer()
+	}
+
 	// TODO: add the request config inference
 
 	var project neon.Project
@@ -731,8 +805,28 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 	panic("implement me")
 }
 func (r neonProjectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	// TODO implement me
-	panic("implement me")
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var state neonProjectResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
+		_, err := r.client.DeleteProject(state.ID.ValueString())
+		return err
+	}, ctx, map[int]func(context.Context) error{
+		http.StatusNotFound: func(_ context.Context) error { return nil },
+	})...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.State.RemoveResource(ctx)
 }
 
 func (r neonProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

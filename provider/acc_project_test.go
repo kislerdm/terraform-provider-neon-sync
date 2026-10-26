@@ -571,3 +571,97 @@ func TestPrimaryCompute(t *testing.T) {
 				})
 		})
 }
+
+func TestProject(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectNamePrefix := "pr-"
+
+	t.Cleanup(func() {
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		for _, project := range resp.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	var verify = func(state *terraform.State) error {
+		r, ok := state.RootModule().Resources["neon_project.this"]
+		assert.Truef(t, ok, "no project resource found")
+		resp, err := client.GetProject(r.Primary.ID)
+		if err != nil {
+			return err
+		}
+		assert.Equal(t, *resp.Project.OrgID, r.Primary.Attributes["org_id"])
+		assert.Equal(t, resp.Project.RegionID, r.Primary.Attributes["region_id"])
+		assert.Equal(t, fmt.Sprintf("%d", resp.Project.PgVersion), r.Primary.Attributes["pg_version"])
+		return nil
+	}
+
+	t.Run("shall create a project w/ default configs only", func(t *testing.T) {
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: `resource "neon_project" "this" {}`,
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttrSet("neon_project.this", "id"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "org_id"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "name"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "region_id"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "pg_version"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_id"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_branch_protected"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "default_endpoint_id"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_host"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_host_pooler"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "history_retention_seconds"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_name"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "database_user"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "autoscaling_limit_min_cu"),
+							resource.TestCheckResourceAttrSet("neon_project.this", "autoscaling_limit_max_cu"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "hipaa", "false"),
+							resource.TestCheckResourceAttr("neon_project.this", "enable_logical_replication",
+								"false"),
+							resource.TestCheckResourceAttr("neon_project.this", "block_public_connections",
+								"false"),
+							resource.TestCheckResourceAttr("neon_project.this", "block_vpc_connections",
+								"false"),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips_protected_branches_only",
+								"false"),
+							resource.TestCheckResourceAttr("neon_project.this", "store_password",
+								"true"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.#", "0"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "enabled_libraries.#", "0"),
+							resource.TestCheckNoResourceAttr("neon_project.this", "enabled_libraries_use_defaults"),
+
+							resource.TestCheckResourceAttr("neon_project.this", "suspend_timeout_seconds", "0"),
+							resource.TestCheckResourceAttr("neon_project.this", "compute_provisioner", "k8s-neonvm"),
+
+							// no blocks shall be present in the state
+							resource.TestCheckNoResourceAttr("neon_project.this", "primary_compute"),
+							resource.TestCheckNoResourceAttr("neon_project.this", "branch"),
+							resource.TestCheckNoResourceAttr("neon_project.this", "maintenance_window"),
+							resource.TestCheckNoResourceAttr("neon_project.this", "quota"),
+
+							// TODO: remove after off. release
+							resource.TestCheckResourceAttr("neon_project.this", "connection_uri", ""),
+							resource.TestCheckResourceAttr("neon_project.this", "connection_uri_pooler", ""),
+							resource.TestCheckResourceAttr("neon_project.this", "database_password", ""),
+							verify,
+						),
+					},
+				},
+			})
+	})
+}

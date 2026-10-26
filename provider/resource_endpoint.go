@@ -257,17 +257,11 @@ func (v validatorComputeProvisioner) MarkdownDescription(ctx context.Context) st
 
 func (v validatorComputeProvisioner) ValidateString(ctx context.Context, req validator.StringRequest,
 	resp *validator.StringResponse) {
-	var data neonEndpointResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	if req.ConfigValue.IsNull() {
 		return
 	}
 
-	if data.ComputeProvisioner.IsNull() {
-		return
-	}
-
-	switch data.ComputeProvisioner.ValueString() {
+	switch req.ConfigValue.ValueString() {
 	case "k8s-neonvm", "k8s-pod", "docker", "serverless-platform":
 	default:
 		resp.Diagnostics.AddError(`Invalid endpoint's "compute_provisioner"`,
@@ -289,17 +283,11 @@ func (v validatorSuspendTimeout) MarkdownDescription(ctx context.Context) string
 
 func (v validatorSuspendTimeout) ValidateInt64(ctx context.Context, req validator.Int64Request,
 	resp *validator.Int64Response) {
-	var data neonEndpointResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	if req.ConfigValue.IsNull() {
 		return
 	}
 
-	if data.SuspendTimeoutSeconds.IsNull() {
-		return
-	}
-
-	val := data.SuspendTimeoutSeconds.ValueInt64()
+	val := req.ConfigValue.ValueInt64()
 	if val != 0 &&
 		// never suspend
 		val != -1 &&
@@ -324,17 +312,11 @@ func (v validatorEndpointType) MarkdownDescription(ctx context.Context) string {
 
 func (v validatorEndpointType) ValidateString(ctx context.Context, req validator.StringRequest,
 	resp *validator.StringResponse) {
-	var data neonEndpointResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	if req.ConfigValue.IsNull() {
 		return
 	}
 
-	if data.ComputeProvisioner.IsNull() {
-		return
-	}
-
-	if _, err := neon.NewEndpointType(data.Type.ValueString()); err != nil {
+	if _, err := neon.NewEndpointType(req.ConfigValue.ValueString()); err != nil {
 		resp.Diagnostics.AddError(`Invalid endpoint "type"`, err.Error())
 	}
 }
