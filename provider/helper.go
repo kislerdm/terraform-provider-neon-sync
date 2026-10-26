@@ -181,6 +181,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			MarkdownDescription: attr.MarkdownDescription,
 			DeprecationMessage:  attr.DeprecationMessage,
 			CustomType:          attr.CustomType,
+			Attributes:          make(map[string]schemaResource.Attribute, len(attr.Attributes)),
 		}
 		for k, v := range attr.Attributes {
 			o.Attributes[k] = newReadOnlyResourceAttrFromResourceAttr(v)
@@ -197,6 +198,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			CustomType:          attr.CustomType,
 			NestedObject: schemaResource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaResource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
@@ -214,6 +216,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			CustomType:          attr.CustomType,
 			NestedObject: schemaResource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaResource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
@@ -231,6 +234,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			CustomType:          attr.CustomType,
 			NestedObject: schemaResource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaResource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
@@ -389,6 +393,7 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 			MarkdownDescription: attr.MarkdownDescription,
 			DeprecationMessage:  attr.DeprecationMessage,
 			CustomType:          attr.CustomType,
+			Attributes:          make(map[string]schemaDataSource.Attribute, len(attr.Attributes)),
 		}
 		for k, v := range attr.Attributes {
 			o.Attributes[k] = newReadOnlyDataSourceAttrFromResourceAttr(v)
@@ -405,6 +410,7 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 			CustomType:          attr.CustomType,
 			NestedObject: schemaDataSource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaDataSource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
@@ -422,6 +428,7 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 			CustomType:          attr.CustomType,
 			NestedObject: schemaDataSource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaDataSource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
@@ -439,6 +446,7 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 			CustomType:          attr.CustomType,
 			NestedObject: schemaDataSource.NestedAttributeObject{
 				CustomType: attr.NestedObject.CustomType,
+				Attributes: make(map[string]schemaDataSource.Attribute, len(attr.NestedObject.Attributes)),
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
