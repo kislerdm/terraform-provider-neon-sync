@@ -670,6 +670,56 @@ func TestProject(t *testing.T) {
 						r.Primary.Attributes[fmt.Sprintf("maintenance_window.weekdays.%d", i)])
 				}
 			}
+
+			if settings.Quota != nil {
+				if settings.Quota.WrittenDataBytes != nil {
+					assert.Equal(t, fmt.Sprintf("%d", *settings.Quota.WrittenDataBytes),
+						r.Primary.Attributes["quota.written_data_bytes"])
+				}
+				if settings.Quota.LogicalSizeBytes != nil {
+					assert.Equal(t, fmt.Sprintf("%d", *settings.Quota.LogicalSizeBytes),
+						r.Primary.Attributes["quota.logical_size_bytes"])
+				}
+				if settings.Quota.DataTransferBytes != nil {
+					assert.Equal(t, fmt.Sprintf("%d", *settings.Quota.DataTransferBytes),
+						r.Primary.Attributes["quota.data_transfer_bytes"])
+				}
+				if settings.Quota.ComputeTimeSeconds != nil {
+					assert.Equal(t, fmt.Sprintf("%d", *settings.Quota.ComputeTimeSeconds),
+						r.Primary.Attributes["quota.compute_time_seconds"])
+				}
+				if settings.Quota.ActiveTimeSeconds != nil {
+					assert.Equal(t, fmt.Sprintf("%d", *settings.Quota.ActiveTimeSeconds),
+						r.Primary.Attributes["quota.active_time_seconds"])
+				}
+			}
+		}
+
+		defaultEndpointSettings := resp.Project.DefaultEndpointSettings
+		var asserAutoscalingUnits = func(want *neon.ComputeUnit, got string) {
+			if want == nil {
+				return
+			}
+			var ref string
+			switch {
+			case *want >= 1:
+				ref = fmt.Sprintf("%d", int64(*want))
+			// to avoid rounding error
+			case *want > 0.3:
+				ref = "0.5"
+			// to avoid rounding error
+			case *want > 0:
+				ref = "0.25"
+			default:
+				ref = fmt.Sprintf("%.2f", *want)
+			}
+			assert.Equal(t, ref, got)
+		}
+		if defaultEndpointSettings != nil {
+			asserAutoscalingUnits(defaultEndpointSettings.AutoscalingLimitMinCu, r.Primary.Attributes["autoscaling_limit_min_cu"])
+			asserAutoscalingUnits(defaultEndpointSettings.AutoscalingLimitMaxCu, r.Primary.Attributes["autoscaling_limit_max_cu"])
+			assert.Equal(t, fmt.Sprintf("%d", *defaultEndpointSettings.SuspendTimeoutSeconds),
+				r.Primary.Attributes["suspend_timeout_seconds"])
 		}
 
 		return nil

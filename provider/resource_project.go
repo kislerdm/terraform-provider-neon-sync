@@ -114,6 +114,9 @@ type neonProjectResourceModel struct {
 	Branch            *neonBranchResourceModel   `tfsdk:"branch"`
 	PrimaryCompute    *neonEndpointResourceModel `tfsdk:"primary_compute"`
 
+	// 	TODO: add pgSettings (?) verify for bug in API behaviour
+	// 	TODO: add autit level
+
 	// TODO: delete after the off. release: it's here for BW compatibility only
 	DefaultBranchID types.String `tfsdk:"default_branch_id"`
 	// TODO: delete after the off. release: it's here for BW compatibility only
@@ -124,7 +127,6 @@ type neonProjectResourceModel struct {
 	DatabaseHost types.String `tfsdk:"database_host"`
 	// TODO: delete after the off. release: it's here for BW compatibility only
 	DatabaseHostPooler types.String `tfsdk:"database_host_pooler"`
-	// 	TODO: add pgSettings (?) verify for bug in API behaviour
 }
 
 func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.Project, branch neon.Branch,
