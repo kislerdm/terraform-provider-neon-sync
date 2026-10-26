@@ -871,6 +871,38 @@ func TestProject(t *testing.T) {
 			})
 	})
 
+	var config = func(projectName string, customCfg string) string {
+		return fmt.Sprintf(`resource "neon_project" "this" {
+		name = %q
+		%s
+	}`, projectName, customCfg)
+	}
+
+	t.Run("shall create a project w/ custom maintenance window", func(t *testing.T) {
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: config(newProjectName(projectNamePrefix),
+							`maintenance_window = {
+	start_time = "00:00"
+	end_time   = "01:00"
+	weekdays   = [1,2]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "00:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "01:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "2"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.1", "2"),
+							verify,
+						),
+					},
+				},
+			})
+	})
+
 	t.Run("shall update the name", func(t *testing.T) {
 		resource.Test(
 			t, resource.TestCase{
@@ -890,6 +922,92 @@ func TestProject(t *testing.T) {
 						}`, projectNamePrefix+"bar"),
 						Check: resource.ComposeTestCheckFunc(
 							resource.TestCheckResourceAttr("neon_project.this", "name", projectNamePrefix+"bar"),
+						),
+					},
+				},
+			})
+	})
+
+	t.Run("shall update maintenance window", func(t *testing.T) {
+		// see: https://github.com/neondatabase/terraform-provider-neon/issues/60
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: config(projectName, ``),
+						Check:  verify,
+					},
+					{
+						Config: config(projectName, `maintenance_window = {
+	start_time = "00:00"
+	end_time   = "01:00"
+	weekdays   = [1,2]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "00:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "01:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "2"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.1", "2"),
+							verify,
+						),
+					},
+					{
+						Config: config(projectName, `maintenance_window = {
+	start_time = "00:00"
+	end_time   = "01:00"
+	weekdays   = [1]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "00:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "01:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "1"),
+							verify,
+						),
+					},
+					{
+						Config: config(projectName, `maintenance_window = {
+	start_time = "00:00"
+	end_time   = "02:00"
+	weekdays   = [1]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "00:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "02:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "1"),
+							verify,
+						),
+					},
+					{
+						Config: config(projectName, `maintenance_window = {
+	start_time = "01:00"
+	end_time   = "02:00"
+	weekdays   = [1]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "01:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "02:00"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "1"),
+							verify,
+						),
+					},
+					{
+						Config: config(projectName, `maintenance_window = {
+	start_time = "01:30"
+	end_time   = "02:30"
+	weekdays   = [2]
+}`),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.start_time", "01:30"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.end_time", "02:30"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.#", "1"),
+							resource.TestCheckResourceAttr("neon_project.this", "maintenance_window.weekdays.0", "2"),
+							verify,
 						),
 					},
 				},

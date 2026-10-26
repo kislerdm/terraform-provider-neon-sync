@@ -129,6 +129,27 @@ type neonProjectResourceModel struct {
 	DatabaseHostPooler types.String `tfsdk:"database_host_pooler"`
 }
 
+func (v neonProjectResourceModel) maintenanceWindow(ctx context.Context, diagnostics *diag.Diagnostics) *neon.MaintenanceWindow {
+	if v.MaintenanceWindow == nil {
+		return nil
+	}
+	var tmp []int32
+	diagnostics.Append(v.MaintenanceWindow.Weekdays.ElementsAs(ctx, &tmp, false)...)
+	if diagnostics.HasError() {
+		return nil
+	}
+
+	o := &neon.MaintenanceWindow{
+		StartTime: v.MaintenanceWindow.StartTime.ValueString(),
+		EndTime:   v.MaintenanceWindow.EndTime.ValueString(),
+		Weekdays:  make([]int, 0, len(tmp)),
+	}
+	for _, el := range tmp {
+		o.Weekdays = append(o.Weekdays, int(el))
+	}
+	return o
+}
+
 func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.Project, branch neon.Branch,
 	endpoint neon.Endpoint, database neon.Database, diagnostics *diag.Diagnostics) {
 	v.ID = types.StringValue(project.ID)
@@ -579,14 +600,17 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				"weekdays": schema.ListAttribute{
 					Description: "A list of weekdays when the maintenance window is active. Encoded as ints, where 1 - Monday, and 7 - Sunday.",
 					ElementType: types.Int32Type,
+					Optional:    true,
 					Computed:    true,
 				},
 				"start_time": schema.StringAttribute{
 					Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+					Optional:    true,
 					Computed:    true,
 				},
 				"end_time": schema.StringAttribute{
 					Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+					Optional:    true,
 					Computed:    true,
 				},
 			},
@@ -624,6 +648,16 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 	var cfg neon.ProjectCreateRequest
 	if state.Name.ValueStringPointer() != nil && state.Name.ValueString() != "" {
 		cfg.Project.Name = state.Name.ValueStringPointer()
+	}
+
+	if state.MaintenanceWindow != nil {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		cfg.Project.Settings.MaintenanceWindow = state.maintenanceWindow(ctx, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// TODO: add the request config inference
@@ -789,6 +823,29 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 	var cfg neon.ProjectUpdateRequest
 	if !prior.Name.Equal(plan.Name) && plan.Name.ValueString() != "" {
 		cfg.Project.Name = plan.Name.ValueStringPointer()
+	}
+
+	var updateMaintenanceWindow bool
+	if plan.MaintenanceWindow != nil {
+		if prior.MaintenanceWindow != nil {
+			if !plan.MaintenanceWindow.Weekdays.Equal(prior.MaintenanceWindow.Weekdays) ||
+				!plan.MaintenanceWindow.StartTime.Equal(prior.MaintenanceWindow.StartTime) ||
+				!plan.MaintenanceWindow.EndTime.Equal(prior.MaintenanceWindow.EndTime) {
+				updateMaintenanceWindow = true
+			}
+		} else {
+			updateMaintenanceWindow = true
+		}
+	}
+
+	if updateMaintenanceWindow {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		cfg.Project.Settings.MaintenanceWindow = plan.maintenanceWindow(ctx, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// TODO: add the request config inference
