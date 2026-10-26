@@ -664,4 +664,29 @@ func TestProject(t *testing.T) {
 				},
 			})
 	})
+
+	t.Run("shall update the name", func(t *testing.T) {
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name = %q
+						}`, projectNamePrefix+"foo"),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "name", projectNamePrefix+"foo"),
+						),
+					},
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name = %q
+						}`, projectNamePrefix+"bar"),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "name", projectNamePrefix+"bar"),
+						),
+					},
+				},
+			})
+	})
 }

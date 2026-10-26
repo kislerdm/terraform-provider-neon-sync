@@ -820,9 +820,43 @@ func (r neonProjectResource) Read(ctx context.Context, req resource.ReadRequest,
 }
 
 func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// TODO implement me
-	panic("implement me")
+	if r.client == nil {
+		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
+		return
+	}
+
+	var plan, prior neonProjectResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &prior)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var cfg neon.ProjectUpdateRequest
+	if !prior.Name.Equal(plan.Name) && plan.Name.ValueString() != "" {
+		cfg.Project.Name = plan.Name.ValueStringPointer()
+	}
+
+	// TODO: add the request config inference
+
+	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
+		result, err := r.client.UpdateProject(plan.ID.ValueString(), cfg)
+		if err != nil {
+			return err
+		}
+		waitUnfinishedOperations(ctx, r.client, result.OperationsResponse.Operations)
+		return nil
+	}, ctx)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
+
 func (r neonProjectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
