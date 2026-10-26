@@ -650,4 +650,7 @@ func (r *neonEndpointResource) ImportState(ctx context.Context, req resource.Imp
 	readResp := resource.ReadResponse{State: resp.State}
 	r.Read(ctx, resource.ReadRequest{State: resp.State}, &readResp)
 	resp.Diagnostics.Append(readResp.Diagnostics...)
+	if resp.State.Raw.IsNull() {
+		resp.Diagnostics.AddError("endpoint not found", "")
+	}
 }
