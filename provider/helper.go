@@ -6,7 +6,6 @@ import (
 	schemaDataSource "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	schemaResource "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
@@ -38,6 +37,142 @@ func stringChanged(prior, planned types.String) bool {
 
 func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) schemaResource.Attribute {
 	switch attr.(type) {
+	case schemaResource.StringAttribute:
+		attr := attr.(schemaResource.StringAttribute)
+		return schemaResource.StringAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.BoolAttribute:
+		attr := attr.(schemaResource.BoolAttribute)
+		return schemaResource.BoolAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Float32Attribute:
+		attr := attr.(schemaResource.Float32Attribute)
+		return schemaResource.Float32Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Float64Attribute:
+		attr := attr.(schemaResource.Float64Attribute)
+		return schemaResource.Float64Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Int32Attribute:
+		attr := attr.(schemaResource.Int32Attribute)
+		return schemaResource.Int32Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Int64Attribute:
+		attr := attr.(schemaResource.Int64Attribute)
+		return schemaResource.Int64Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.NumberAttribute:
+		attr := attr.(schemaResource.NumberAttribute)
+		return schemaResource.NumberAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.DynamicAttribute:
+		attr := attr.(schemaResource.DynamicAttribute)
+		return schemaResource.DynamicAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.ListAttribute:
+		attr := attr.(schemaResource.ListAttribute)
+		return schemaResource.ListAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.SetAttribute:
+		attr := attr.(schemaResource.SetAttribute)
+		return schemaResource.SetAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.ObjectAttribute:
+		attr := attr.(schemaResource.ObjectAttribute)
+		return schemaResource.ObjectAttribute{
+			Computed:            true,
+			AttributeTypes:      attr.AttributeTypes,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.MapAttribute:
+		attr := attr.(schemaResource.MapAttribute)
+		return schemaResource.MapAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
 	case schemaResource.SingleNestedAttribute:
 		attr := attr.(schemaResource.SingleNestedAttribute)
 		o := schemaResource.SingleNestedAttribute{
@@ -48,7 +183,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			CustomType:          attr.CustomType,
 		}
 		for k, v := range attr.Attributes {
-			o.Attributes[k] = newReadOnlyDataSourceAttrFromResourceAttr(v)
+			o.Attributes[k] = newReadOnlyResourceAttrFromResourceAttr(v)
 		}
 		return o
 
@@ -65,7 +200,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
-			o.NestedObject.Attributes[k] = newReadOnlyDataSourceAttrFromResourceAttr(v)
+			o.NestedObject.Attributes[k] = newReadOnlyResourceAttrFromResourceAttr(v)
 		}
 		return o
 
@@ -82,7 +217,7 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
-			o.NestedObject.Attributes[k] = newReadOnlyDataSourceAttrFromResourceAttr(v)
+			o.NestedObject.Attributes[k] = newReadOnlyResourceAttrFromResourceAttr(v)
 		}
 		return o
 
@@ -99,156 +234,153 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 			},
 		}
 		for k, v := range attr.NestedObject.Attributes {
-			o.NestedObject.Attributes[k] = newReadOnlyDataSourceAttrFromResourceAttr(v)
+			o.NestedObject.Attributes[k] = newReadOnlyResourceAttrFromResourceAttr(v)
 		}
 		return o
 
 	default:
-		switch attr.GetType() {
-		case basetypes.StringType{}:
-			attr := attr.(schemaResource.StringAttribute)
-			return schemaResource.StringAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.BoolType{}:
-			attr := attr.(schemaResource.BoolAttribute)
-			return schemaResource.BoolAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Float32Type{}:
-			attr := attr.(schemaResource.Float32Attribute)
-			return schemaResource.Float32Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Float64Type{}:
-			attr := attr.(schemaResource.Float64Attribute)
-			return schemaResource.Float64Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Int32Type{}:
-			attr := attr.(schemaResource.Int32Attribute)
-			return schemaResource.Int32Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Int64Type{}:
-			attr := attr.(schemaResource.Int64Attribute)
-			return schemaResource.Int64Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.ListType{}:
-			attr := attr.(schemaResource.ListAttribute)
-			return schemaResource.ListAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.MapType{}:
-			attr := attr.(schemaResource.MapAttribute)
-			return schemaResource.MapAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.NumberType{}:
-			attr := attr.(schemaResource.NumberAttribute)
-			return schemaResource.NumberAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.SetType{}:
-			attr := attr.(schemaResource.SetAttribute)
-			return schemaResource.SetAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.DynamicType{}:
-			attr := attr.(schemaResource.DynamicAttribute)
-			return schemaResource.DynamicAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-		default:
-			attr, ok := attr.(schemaResource.ObjectAttribute)
-			if ok {
-				return schemaResource.ObjectAttribute{
-					Computed:            true,
-					AttributeTypes:      attr.AttributeTypes,
-					CustomType:          attr.CustomType,
-					Sensitive:           attr.Sensitive,
-					Description:         attr.Description,
-					MarkdownDescription: attr.MarkdownDescription,
-					DeprecationMessage:  attr.DeprecationMessage,
-				}
-			}
-
-			return nil
-		}
+		return nil
 	}
 }
 
 func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) schemaDataSource.Attribute {
 	switch attr.(type) {
+	case schemaResource.StringAttribute:
+		attr := attr.(schemaResource.StringAttribute)
+		return schemaDataSource.StringAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.BoolAttribute:
+		attr := attr.(schemaResource.BoolAttribute)
+		return schemaDataSource.BoolAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Float32Attribute:
+		attr := attr.(schemaResource.Float32Attribute)
+		return schemaDataSource.Float32Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Float64Attribute:
+		attr := attr.(schemaResource.Float64Attribute)
+		return schemaDataSource.Float64Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Int32Attribute:
+		attr := attr.(schemaResource.Int32Attribute)
+		return schemaDataSource.Int32Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.Int64Attribute:
+		attr := attr.(schemaResource.Int64Attribute)
+		return schemaDataSource.Int64Attribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.NumberAttribute:
+		attr := attr.(schemaResource.NumberAttribute)
+		return schemaDataSource.NumberAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.DynamicAttribute:
+		attr := attr.(schemaResource.DynamicAttribute)
+		return schemaDataSource.DynamicAttribute{
+			Computed:            true,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.ListAttribute:
+		attr := attr.(schemaResource.ListAttribute)
+		return schemaDataSource.ListAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.SetAttribute:
+		attr := attr.(schemaResource.SetAttribute)
+		return schemaDataSource.SetAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.ObjectAttribute:
+		attr := attr.(schemaResource.ObjectAttribute)
+		return schemaDataSource.ObjectAttribute{
+			Computed:            true,
+			AttributeTypes:      attr.AttributeTypes,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
+	case schemaResource.MapAttribute:
+		attr := attr.(schemaResource.MapAttribute)
+		return schemaDataSource.MapAttribute{
+			Computed:            true,
+			ElementType:         attr.ElementType,
+			CustomType:          attr.CustomType,
+			Sensitive:           attr.Sensitive,
+			Description:         attr.Description,
+			MarkdownDescription: attr.MarkdownDescription,
+			DeprecationMessage:  attr.DeprecationMessage,
+		}
+
 	case schemaResource.SingleNestedAttribute:
 		attr := attr.(schemaResource.SingleNestedAttribute)
 		o := schemaDataSource.SingleNestedAttribute{
@@ -315,144 +447,68 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		return o
 
 	default:
-		switch attr.GetType() {
-		case basetypes.StringType{}:
-			attr := attr.(schemaResource.StringAttribute)
-			return schemaDataSource.StringAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.BoolType{}:
-			attr := attr.(schemaResource.BoolAttribute)
-			return schemaDataSource.BoolAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Float32Type{}:
-			attr := attr.(schemaResource.Float32Attribute)
-			return schemaDataSource.Float32Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Float64Type{}:
-			attr := attr.(schemaResource.Float64Attribute)
-			return schemaDataSource.Float64Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Int32Type{}:
-			attr := attr.(schemaResource.Int32Attribute)
-			return schemaDataSource.Int32Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.Int64Type{}:
-			attr := attr.(schemaResource.Int64Attribute)
-			return schemaDataSource.Int64Attribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.ListType{}:
-			attr := attr.(schemaResource.ListAttribute)
-			return schemaDataSource.ListAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.MapType{}:
-			attr := attr.(schemaResource.MapAttribute)
-			return schemaDataSource.MapAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.NumberType{}:
-			attr := attr.(schemaResource.NumberAttribute)
-			return schemaDataSource.NumberAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.SetType{}:
-			attr := attr.(schemaResource.SetAttribute)
-			return schemaDataSource.SetAttribute{
-				Computed:            true,
-				ElementType:         attr.ElementType,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-
-		case basetypes.DynamicType{}:
-			attr := attr.(schemaResource.DynamicAttribute)
-			return schemaDataSource.DynamicAttribute{
-				Computed:            true,
-				CustomType:          attr.CustomType,
-				Sensitive:           attr.Sensitive,
-				Description:         attr.Description,
-				MarkdownDescription: attr.MarkdownDescription,
-				DeprecationMessage:  attr.DeprecationMessage,
-			}
-		default:
-			attr, ok := attr.(schemaResource.ObjectAttribute)
-			if ok {
-				return schemaDataSource.ObjectAttribute{
-					Computed:            true,
-					AttributeTypes:      attr.AttributeTypes,
-					CustomType:          attr.CustomType,
-					Sensitive:           attr.Sensitive,
-					Description:         attr.Description,
-					MarkdownDescription: attr.MarkdownDescription,
-					DeprecationMessage:  attr.DeprecationMessage,
-				}
-			}
-			return nil
-		}
+		return nil
 	}
+}
+
+func newReadOnlyDataSourceBlockFromResourceBlock(block schemaResource.Block) schemaDataSource.Block {
+	switch block := block.(type) {
+	case schemaResource.SingleNestedBlock:
+		attributes, blocks := newReadOnlyDataSourceNestedBlockContents(block.Attributes, block.Blocks)
+		return schemaDataSource.SingleNestedBlock{
+			Description:         block.Description,
+			MarkdownDescription: block.MarkdownDescription,
+			DeprecationMessage:  block.DeprecationMessage,
+			CustomType:          block.CustomType,
+			Attributes:          attributes,
+			Blocks:              blocks,
+		}
+
+	case schemaResource.ListNestedBlock:
+		return schemaDataSource.ListNestedBlock{
+			Description:         block.Description,
+			MarkdownDescription: block.MarkdownDescription,
+			DeprecationMessage:  block.DeprecationMessage,
+			CustomType:          block.CustomType,
+			NestedObject:        newReadOnlyDataSourceNestedBlockObject(block.NestedObject),
+		}
+
+	case schemaResource.SetNestedBlock:
+		return schemaDataSource.SetNestedBlock{
+			Description:         block.Description,
+			MarkdownDescription: block.MarkdownDescription,
+			DeprecationMessage:  block.DeprecationMessage,
+			CustomType:          block.CustomType,
+			NestedObject:        newReadOnlyDataSourceNestedBlockObject(block.NestedObject),
+		}
+
+	default:
+		panic("unsupported resource block type")
+	}
+}
+
+func newReadOnlyDataSourceNestedBlockObject(object schemaResource.NestedBlockObject) schemaDataSource.NestedBlockObject {
+	attributes, blocks := newReadOnlyDataSourceNestedBlockContents(object.Attributes, object.Blocks)
+
+	return schemaDataSource.NestedBlockObject{
+		Attributes: attributes,
+		Blocks:     blocks,
+	}
+}
+
+func newReadOnlyDataSourceNestedBlockContents(
+	resourceAttributes map[string]schemaResource.Attribute,
+	resourceBlocks map[string]schemaResource.Block,
+) (map[string]schemaDataSource.Attribute, map[string]schemaDataSource.Block) {
+	attributes := make(map[string]schemaDataSource.Attribute, len(resourceAttributes))
+	for name, attr := range resourceAttributes {
+		attributes[name] = newReadOnlyDataSourceAttrFromResourceAttr(attr)
+	}
+
+	blocks := make(map[string]schemaDataSource.Block, len(resourceBlocks))
+	for name, block := range resourceBlocks {
+		blocks[name] = newReadOnlyDataSourceBlockFromResourceBlock(block)
+	}
+
+	return attributes, blocks
 }
