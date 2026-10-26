@@ -852,6 +852,25 @@ func TestProject(t *testing.T) {
 			})
 	})
 
+	t.Run("shall create a project w/ custom name", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name = %q
+						}`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "name", projectName),
+							verify,
+						),
+					},
+				},
+			})
+	})
+
 	t.Run("shall update the name", func(t *testing.T) {
 		resource.Test(
 			t, resource.TestCase{
