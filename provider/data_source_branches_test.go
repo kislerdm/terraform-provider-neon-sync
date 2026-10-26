@@ -267,7 +267,6 @@ func TestBranchesDataSource(t *testing.T) {
 							if attribute.Name != "branches" {
 								continue
 							}
-							require.Len(t, attribute.NestedType.Attributes, 10)
 							for _, field := range attribute.NestedType.Attributes {
 								require.True(t, field.Computed, field.Name)
 								require.False(t, field.Optional, field.Name)

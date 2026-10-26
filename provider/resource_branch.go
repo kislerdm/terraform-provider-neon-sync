@@ -80,12 +80,12 @@ func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest,
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
-				Description: "Project ID",
+				Description: "Project ID.",
 			},
 			"name": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "The branch name.",
+				Description: "Branch name.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -93,40 +93,36 @@ func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"parent_id": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "The ID of the branch to check out.",
+				Description: "Parent branch ID.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"parent_lsn": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_timestamp**.`,
+				Optional:    true,
+				Computed:    true,
+				Description: "Parent branch Log Sequence Number (LSN).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"parent_timestamp": schema.Int64Attribute{
-				Optional:   true,
-				Computed:   true,
-				Validators: []validator.Int64{notNegativeInt64},
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_lsn**.`,
+				Optional:    true,
+				Computed:    true,
+				Validators:  []validator.Int64{notNegativeInt64},
+				Description: "Parent branch point-in-time timestamp in Unix seconds. Zero when not provided by the API.",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
 			"logical_size": schema.Int64Attribute{
 				Computed:    true,
-				Description: "Branch logical size in MB.",
+				Description: "Branch logical size in bytes.",
 			},
 			"protected": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Set whether the branch is protected.",
+				Description: "Protected branch flag.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
