@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
@@ -32,7 +34,24 @@ func (d *neonBranchesDataSource) Metadata(_ context.Context, _ datasource.Metada
 	resp.TypeName = "neon_branches"
 }
 
-func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *neonBranchesDataSource) Schema(ctx context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	var resourceResponse resource.SchemaResponse
+	NewNeonBranchResource().Schema(ctx, resource.SchemaRequest{}, &resourceResponse)
+	resp.Diagnostics.Append(resourceResponse.Diagnostics...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	attributes := make(map[string]schema.Attribute, len(resourceResponse.Schema.Attributes))
+	for name, attribute := range resourceResponse.Schema.Attributes {
+		converted := newReadOnlyDataSourceAttrFromResourceAttr(attribute)
+		if converted == nil {
+			resp.Diagnostics.AddError("Unsupported branch attribute",
+				fmt.Sprintf("%q has unsupported type %T", name, attribute.GetType()))
+			return
+		}
+		attributes[name] = converted
+	}
+
 	resp.Schema = schema.Schema{
 		Description: "Fetch Project Branches.",
 		Attributes: map[string]schema.Attribute{
@@ -52,49 +71,7 @@ func (d *neonBranchesDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 				Computed:    true,
 				Description: "Project branches in API response order.",
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.StringAttribute{
-							Computed:    true,
-							Description: "Branch ID.",
-						},
-						"project_id": schema.StringAttribute{
-							Computed:    true,
-							Description: "Project ID.",
-						},
-						"name": schema.StringAttribute{
-							Computed:    true,
-							Description: "Branch name.",
-						},
-						"parent_id": schema.StringAttribute{
-							Computed:    true,
-							Description: "Parent branch ID.",
-						},
-						"parent_lsn": schema.StringAttribute{
-							Computed:    true,
-							Description: "Parent branch Log Sequence Number (LSN).",
-						},
-						"parent_timestamp": schema.Int64Attribute{
-							Computed:    true,
-							Description: "Parent branch point-in-time timestamp in Unix seconds. Zero when not provided by the API.",
-						},
-						"logical_size": schema.Int64Attribute{
-							Computed:    true,
-							Description: "Branch logical size in bytes.",
-						},
-						"primary": schema.BoolAttribute{
-							Computed:           true,
-							Description:        "Primary branch flag.",
-							DeprecationMessage: "Use default instead.",
-						},
-						"default": schema.BoolAttribute{
-							Computed:    true,
-							Description: "Default branch flag.",
-						},
-						"protected": schema.BoolAttribute{
-							Computed:    true,
-							Description: "Protected branch flag.",
-						},
-					},
+					Attributes: attributes,
 				},
 			},
 		},

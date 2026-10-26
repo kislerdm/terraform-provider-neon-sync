@@ -72,46 +72,42 @@ func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		Attributes: map[string]schemaTFSDK.Attribute{
 			"id": schemaTFSDK.StringAttribute{
 				Computed:    true,
-				Description: "The Neon branch ID.",
+				Description: "Branch ID.",
 			},
 			"project_id": schemaTFSDK.StringAttribute{
 				Required:      true,
 				PlanModifiers: requiresReplace,
-				Description:   "The Neon project ID",
+				Description:   "Project ID.",
 			},
 			"name": schemaTFSDK.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "The branch name.",
+				Description: "Branch name.",
 			},
 			"parent_id": schemaTFSDK.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "The ID of the branch to check out.",
+				Description: "Parent branch ID.",
 			},
 			"parent_lsn": schemaTFSDK.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_timestamp**.`,
+				Optional:    true,
+				Computed:    true,
+				Description: "Parent branch Log Sequence Number (LSN).",
 			},
 			"parent_timestamp": schemaTFSDK.Int64Attribute{
-				Optional:   true,
-				Computed:   true,
-				Validators: []validator.Int64{notNegativeInt64},
-				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_lsn**.`,
+				Optional:    true,
+				Computed:    true,
+				Validators:  []validator.Int64{notNegativeInt64},
+				Description: "Parent branch point-in-time timestamp in Unix seconds. Zero when not provided by the API.",
 			},
 			"logical_size": schemaTFSDK.Int64Attribute{
 				Computed:    true,
-				Description: "Branch logical size in MB.",
+				Description: "Branch logical size in bytes.",
 			},
 			"protected": schemaTFSDK.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Set whether the branch is protected.",
+				Description: "Protected branch flag.",
 			},
 			"primary": schemaTFSDK.BoolAttribute{
 				Computed:           true,
