@@ -348,6 +348,25 @@ type neonProjectResource struct {
 	client *neon.Client
 }
 
+func initializeProjectBlocks(state *neonProjectResourceModel) {
+	if state.MaintenanceWindow == nil {
+		state.MaintenanceWindow = &maintenanceWindow{
+			Weekdays: types.ListNull(types.Int32Type),
+		}
+	}
+	if state.Quota == nil {
+		state.Quota = &projectQuota{}
+	}
+	if state.Branch == nil {
+		state.Branch = &neonBranchResourceModel{}
+	}
+	if state.PrimaryCompute == nil {
+		state.PrimaryCompute = &neonEndpointResourceModel{
+			EnabledLibraries: types.ListNull(types.StringType),
+		}
+	}
+}
+
 func (r neonProjectResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = "neon_project"
 }
