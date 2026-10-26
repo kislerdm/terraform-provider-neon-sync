@@ -849,6 +849,20 @@ func (r neonProjectResource) Delete(ctx context.Context, req resource.DeleteRequ
 }
 
 func (r neonProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// TODO implement me
-	panic("implement me")
+	state := neonEndpointResourceModel{
+		ID: types.StringValue(req.ID),
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	readResp := resource.ReadResponse{State: resp.State}
+	r.Read(ctx, resource.ReadRequest{State: resp.State}, &readResp)
+	resp.Diagnostics.Append(readResp.Diagnostics...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if resp.State.Raw.IsNull() {
+		resp.Diagnostics.AddError("project not found", "")
+	}
 }
