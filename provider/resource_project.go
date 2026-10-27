@@ -719,6 +719,34 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 		}
 	}
 
+	if !state.AllowedIPs.IsNull() && !state.AllowedIPs.IsUnknown() {
+		var allowedIps []string
+		resp.Diagnostics.Append(state.AllowedIPs.ElementsAs(ctx, &allowedIps, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		if len(allowedIps) > 0 {
+			if cfg.Project.Settings == nil {
+				cfg.Project.Settings = &neon.ProjectSettingsData{}
+			}
+			if cfg.Project.Settings.AllowedIps == nil {
+				cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
+			}
+			cfg.Project.Settings.AllowedIps.Ips = allowedIps
+		}
+	}
+
+	if !state.AllowedIPsProtectedBranchesOnly.IsNull() && !state.AllowedIPsProtectedBranchesOnly.IsUnknown() {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		if cfg.Project.Settings.AllowedIps == nil {
+			cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
+		}
+		cfg.Project.Settings.AllowedIps.ProtectedBranchesOnly = state.AllowedIPsProtectedBranchesOnly.ValueBoolPointer()
+	}
+
 	// TODO: add the request config inference
 
 	var project neon.Project

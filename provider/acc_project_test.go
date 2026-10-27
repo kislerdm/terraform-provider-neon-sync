@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	tfResource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -883,5 +885,123 @@ func TestProject(t *testing.T) {
 					},
 				})
 		})
+}
 
+func TestProjectAllowedIPs(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+	if os.Getenv("SCALE_PLAN") != "1" {
+		t.Skip("test requires Scale plan; set env. variable SCALE_PLAN to 1 to run the test")
+	}
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectNamePrefix := "prAllowedIps"
+
+	t.Cleanup(func() {
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		for _, project := range resp.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	wantAllowedIPs := []string{"192.168.1.0", "192.168.2.0/24"}
+	ips := `["` + strings.Join(wantAllowedIPs, `", "`) + `"]`
+
+	var verify = func(projectName string) (neon.Project, error) {
+		project, err := readProjectInfo(client, projectName)
+		if err != nil {
+			return neon.Project{}, err
+		}
+		var exceedingAllowedIPs []string
+		missingIPs := map[string]struct{}{}
+		for _, ip := range wantAllowedIPs {
+			missingIPs[ip] = struct{}{}
+		}
+		for _, ip := range project.Settings.AllowedIps.Ips {
+			if _, ok := missingIPs[ip]; ok {
+				delete(missingIPs, ip)
+				continue
+			}
+			exceedingAllowedIPs = append(exceedingAllowedIPs, ip)
+		}
+		if len(exceedingAllowedIPs) > 0 || len(missingIPs) > 0 {
+			return neon.Project{}, fmt.Errorf("unexpected allowed ips. want=%v, got=%v",
+				wantAllowedIPs, project.Settings.AllowedIps.Ips)
+		}
+		return project, nil
+	}
+
+	t.Run("shall provision a project with a custom list of allowed IPs", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+			name      				  = %q
+			allowed_ips               = %s
+		}`, projectName, ips),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.#",
+								fmt.Sprintf("%d", len(wantAllowedIPs))),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.0",
+								wantAllowedIPs[0]),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.1",
+								wantAllowedIPs[1]),
+							resource.TestCheckResourceAttr("neon_project.this",
+								"allowed_ips_protected_branches_only", "false"),
+							func(_ *terraform.State) error {
+								_, err := verify(projectName)
+								return err
+							},
+						),
+					},
+				},
+			},
+		)
+	})
+
+	t.Run("shall provision a project with a custom list of allowed IPs set for protected branch only", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+			name      				            = %q
+			allowed_ips                         = %s
+			allowed_ips_protected_branches_only = true
+		}`, projectName, ips),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.#",
+								fmt.Sprintf("%d", len(wantAllowedIPs))),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.0",
+								wantAllowedIPs[0]),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips.1",
+								wantAllowedIPs[1]),
+							resource.TestCheckResourceAttr("neon_project.this", "allowed_ips_protected_branches_only", "true"),
+							func(_ *terraform.State) error {
+								project, err := verify(projectName)
+								if err != nil {
+									return err
+								}
+								if project.Settings.AllowedIps.ProtectedBranchesOnly == nil ||
+									!*project.Settings.AllowedIps.ProtectedBranchesOnly {
+									return errors.New("allowed_ips_protected_branches_only is expected to be set to 'true'")
+								}
+								return nil
+							},
+						),
+					},
+				},
+			},
+		)
+	})
 }

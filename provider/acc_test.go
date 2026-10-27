@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,8 +41,6 @@ func TestAcc(t *testing.T) {
 	})
 
 	end2end(t, client)
-
-	projectAllowedIPs(t, client)
 
 	fetchDataSources(t)
 
@@ -498,178 +495,6 @@ resource "neon_database" "this" {
 			)
 		},
 	)
-}
-
-func projectAllowedIPs(t *testing.T, client *neon.Client) {
-	t.Skip("skipped because the Business plan is required for the feature")
-	wantAllowedIPs := []string{"192.168.1.0", "192.168.2.0/24"}
-	ips := `["` + strings.Join(wantAllowedIPs, `", "`) + `"]`
-
-	t.Run("shall provision a project with a custom list of allowed IPs", func(t *testing.T) {
-		projectName := newProjectName(projectNamePrefixOverall)
-
-		resourceDefinition := fmt.Sprintf(`resource "neon_project" "this" {
-			name      				  = "%s"
-			region_id 				  = "aws-us-west-2"
-			pg_version				  = 16
-			allowed_ips               = %s
-		}`, projectName, ips)
-
-		const resourceNameProject = "neon_project.this"
-		resource.Test(
-			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
-				Steps: []resource.TestStep{
-					{
-						ResourceName: "project",
-						Config:       resourceDefinition,
-						Check: resource.ComposeTestCheckFunc(
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"name", projectName,
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.#", fmt.Sprintf("%d", len(wantAllowedIPs)),
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.0", wantAllowedIPs[0],
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.1", wantAllowedIPs[1],
-							),
-							resource.TestCheckNoResourceAttr(
-								resourceNameProject, "enable_logical_replication",
-							),
-							resource.TestCheckNoResourceAttr(
-								resourceNameProject, "allowed_ips_protected_branches_only",
-							),
-
-							// check the project and its settings
-							func(state *terraform.State) error {
-								ref, err := readProjectInfo(client, projectName)
-								if err != nil {
-									return err
-								}
-
-								var exceedingAllowedIPs []string
-								missingIPs := map[string]struct{}{}
-								for _, ip := range wantAllowedIPs {
-									missingIPs[ip] = struct{}{}
-								}
-
-								for _, ip := range ref.Settings.AllowedIps.Ips {
-									if _, ok := missingIPs[ip]; ok {
-										delete(missingIPs, ip)
-										continue
-									}
-									exceedingAllowedIPs = append(exceedingAllowedIPs, ip)
-								}
-
-								if len(exceedingAllowedIPs) > 0 || len(missingIPs) > 0 {
-									return fmt.Errorf("unexpected allowed ips. want=%v, got=%v",
-										wantAllowedIPs, ref.Settings.AllowedIps.Ips)
-								}
-
-								return nil
-							},
-						),
-					},
-				},
-			},
-		)
-	})
-
-	t.Run("shall provision a project with a custom list of allowed IPs set for protected branch only", func(t *testing.T) {
-		projectName := newProjectName(projectNamePrefixOverall)
-
-		resourceDefinition := fmt.Sprintf(`resource "neon_project" "this" {
-			name      				  = "%s"
-			region_id 				  = "aws-us-west-2"
-			pg_version				  = 16
-			allowed_ips               = %s
-			allowed_ips_protected_branches_only = "yes"
-		}`, projectName, ips)
-
-		const resourceNameProject = "neon_project.this"
-		resource.Test(
-			t, resource.TestCase{
-				ProviderFactories: map[string]func() (*schema.Provider, error){
-					"neon": func() (*schema.Provider, error) {
-						return newAccTest(), nil
-					},
-				},
-				Steps: []resource.TestStep{
-					{
-						ResourceName: "project",
-						Config:       resourceDefinition,
-						Check: resource.ComposeTestCheckFunc(
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"name", projectName,
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.#", fmt.Sprintf("%d", len(wantAllowedIPs)),
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.0", wantAllowedIPs[0],
-							),
-							resource.TestCheckResourceAttr(
-								resourceNameProject,
-								"allowed_ips.1", wantAllowedIPs[1],
-							),
-							resource.TestCheckNoResourceAttr(
-								resourceNameProject, "allowed_ips_protected_branches_only",
-							),
-
-							// check the project and its settings
-							func(state *terraform.State) error {
-								ref, err := readProjectInfo(client, projectName)
-								if err != nil {
-									return err
-								}
-
-								var exceedingAllowedIPs []string
-
-								missingIPs := map[string]struct{}{}
-								for _, ip := range wantAllowedIPs {
-									missingIPs[ip] = struct{}{}
-								}
-
-								for _, ip := range ref.Settings.AllowedIps.Ips {
-									if _, ok := missingIPs[ip]; ok {
-										delete(missingIPs, ip)
-										continue
-									}
-
-									exceedingAllowedIPs = append(exceedingAllowedIPs, ip)
-								}
-
-								if len(exceedingAllowedIPs) > 0 || len(missingIPs) > 0 {
-									return fmt.Errorf("unexpected allowed ips. want=%v, got=%v",
-										wantAllowedIPs, ref.Settings.AllowedIps.Ips)
-								}
-
-								if ref.Settings.AllowedIps.ProtectedBranchesOnly == nil || !*ref.Settings.AllowedIps.ProtectedBranchesOnly {
-									return errors.New("allowed_ips_protected_branches_only is expected to be set to 'true'")
-								}
-
-								return nil
-							},
-						),
-					},
-				},
-			},
-		)
-	})
 }
 
 func fetchDataSources(t *testing.T) {
