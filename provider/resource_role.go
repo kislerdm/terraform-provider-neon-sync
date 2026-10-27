@@ -163,7 +163,7 @@ func (r neonRole) Read(ctx context.Context, req resource.ReadRequest, resp *reso
 		return
 	}
 
-	if role.BranchID == "" {
+	if role.Name == "" {
 		resp.Diagnostics.AddWarning("role not found",
 			fmt.Sprintf("role %q not found in the project/branch \"%s/%s\"", state.Name.ValueString(),
 				state.ProjectID.ValueString(), state.BranchID.ValueString()))
@@ -217,35 +217,30 @@ func (r neonRole) ImportState(ctx context.Context, req resource.ImportStateReque
 		return
 	}
 
-	projectID := els[0]
-	branchID := els[1]
-	roleName := els[2]
-	if !isValidBranchID(branchID) {
+	if !isValidBranchID(els[1]) {
 		resp.Diagnostics.AddError("provided Neon Branch ID is not valid", "")
 		return
 	}
 
-	var role neon.Role
-	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
-		roleResp, err := r.client.GetProjectBranchRole(projectID, branchID, roleName)
-		role = roleResp.Role
-		return err
-	}, ctx)...)
-
-	if resp.Diagnostics.HasError() {
-		resp.State.RemoveResource(ctx)
-		return
+	state := neonRoleResourceModel{
+		ProjectID: typesTFSDK.StringValue(els[0]),
+		BranchID:  typesTFSDK.StringValue(els[1]),
+		Name:      typesTFSDK.StringValue(els[2]),
 	}
 
-	if role.BranchID == "" {
-		resp.Diagnostics.AddWarning("role not found",
-			fmt.Sprintf("role %q not found in the project/branch \"%s/%s\"", roleName, projectID, branchID))
-		return
-	}
-
-	var state neonRoleResourceModel
-	state.ProjectID = typesTFSDK.StringValue(projectID)
-	state.BranchID = typesTFSDK.StringValue(branchID)
-	state.inferAttr(role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	readResp := resource.ReadResponse{State: resp.State}
+	r.Read(ctx, resource.ReadRequest{State: resp.State}, &readResp)
+	resp.Diagnostics.Append(readResp.Diagnostics...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if resp.State.Raw.IsNull() {
+		resp.Diagnostics.AddWarning("role not found",
+			fmt.Sprintf("role %q not found in the project/branch \"%s/%s\"", els[2], els[0], els[1]))
+		return
+	}
 }

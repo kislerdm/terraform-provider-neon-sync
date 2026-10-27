@@ -252,7 +252,7 @@ resource "neon_role" "this" {
 
 							return fmt.Sprintf("%s/%s/test", ref.ID, branchID), nil
 						},
-						ExpectError: regexp.MustCompile("404"),
+						ExpectError: regexp.MustCompile("Cannot import non-existent remote object"),
 					},
 					// to avoid dangling resources on post-test destroy
 					{
@@ -263,7 +263,6 @@ resource "neon_role" "this" {
 	})
 
 	t.Run("shall import the role", func(t *testing.T) {
-		t.Skip("TODO")
 		// test covers the use case in the issue https://github.com/kislerdm/terraform-provider-neon/issues/108
 		projectName := newProjectName(projectNamePrefix)
 		respCreateProject, err := client.CreateProject(neon.ProjectCreateRequest{
@@ -297,8 +296,8 @@ resource "neon_role" "this" {
 					ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, roleName),
 				},
 				{
-					Config:   resourceDefinition,
-					PlanOnly: true,
+					RefreshState: true,
+					PlanOnly:     true,
 				},
 			},
 		})
