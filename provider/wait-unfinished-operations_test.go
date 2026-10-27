@@ -10,6 +10,27 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type mockOpsReader struct {
+	rec         map[string][]time.Time
+	maxRequests map[string]int
+	mu          *sync.Mutex
+}
+
+func (m mockOpsReader) GetProjectOperation(_ string, operationID string) (o neon.OperationResponse, err error) {
+	o = neon.OperationResponse{Operation: neon.Operation{
+		ID:     operationID,
+		Status: neon.OperationStatusFinished,
+	}}
+	m.mu.Lock()
+	m.rec[operationID] = append(m.rec[operationID], time.Now())
+	if m.maxRequests[operationID] > 0 {
+		o.Operation.Status = neon.OperationStatusRunning
+		m.maxRequests[operationID]--
+	}
+	m.mu.Unlock()
+	return o, nil
+}
+
 func Test_waitUnfinishedOperations(t *testing.T) {
 	t.Run("shall wait for two unfinished operations", func(t *testing.T) {
 		operations := []neon.Operation{
