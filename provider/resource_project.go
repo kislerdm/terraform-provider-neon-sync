@@ -969,8 +969,12 @@ func (r neonProjectResource) Delete(ctx context.Context, req resource.DeleteRequ
 }
 
 func (r neonProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	state := neonEndpointResourceModel{
+	state := neonProjectResourceModel{
 		ID: types.StringValue(req.ID),
+		// init to respect the tf types
+		AllowedIPs: types.ListNull(types.StringType),
+		// init to respect the tf types
+		EnabledLibraries: types.ListNull(types.StringType),
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 	if resp.Diagnostics.HasError() {

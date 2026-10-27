@@ -163,7 +163,7 @@ func TestRecreateProjectIfNotFound(t *testing.T) {
 						},
 						ImportState:  true,
 						ResourceName: "neon_project.this",
-						ExpectError:  regexp.MustCompile("404"),
+						ExpectError:  regexp.MustCompile("Cannot import non-existent remote object"),
 					},
 				},
 			})
