@@ -130,7 +130,7 @@ func (d *neonBranchEndpointsDataSource) Configure(_ context.Context, req datasou
 	d.client = adapter.sdk
 }
 
-// TODO: reuse the Read method of the resource neonEndpointResource
+// TODO: reuse the Read method of the resource neonEndpointResource.
 func (d *neonBranchEndpointsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	if d.client == nil {
 		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")

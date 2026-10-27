@@ -36,9 +36,8 @@ func stringChanged(prior, planned types.String) bool {
 }
 
 func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) schemaResource.Attribute {
-	switch attr.(type) {
+	switch attr := attr.(type) {
 	case schemaResource.StringAttribute:
-		attr := attr.(schemaResource.StringAttribute)
 		return schemaResource.StringAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -49,7 +48,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.BoolAttribute:
-		attr := attr.(schemaResource.BoolAttribute)
 		return schemaResource.BoolAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -60,7 +58,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.Float32Attribute:
-		attr := attr.(schemaResource.Float32Attribute)
 		return schemaResource.Float32Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -71,7 +68,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.Float64Attribute:
-		attr := attr.(schemaResource.Float64Attribute)
 		return schemaResource.Float64Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -82,7 +78,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.Int32Attribute:
-		attr := attr.(schemaResource.Int32Attribute)
 		return schemaResource.Int32Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -93,7 +88,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.Int64Attribute:
-		attr := attr.(schemaResource.Int64Attribute)
 		return schemaResource.Int64Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -104,7 +98,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.NumberAttribute:
-		attr := attr.(schemaResource.NumberAttribute)
 		return schemaResource.NumberAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -115,7 +108,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.DynamicAttribute:
-		attr := attr.(schemaResource.DynamicAttribute)
 		return schemaResource.DynamicAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -126,7 +118,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.ListAttribute:
-		attr := attr.(schemaResource.ListAttribute)
 		return schemaResource.ListAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -138,7 +129,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.SetAttribute:
-		attr := attr.(schemaResource.SetAttribute)
 		return schemaResource.SetAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -150,7 +140,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.ObjectAttribute:
-		attr := attr.(schemaResource.ObjectAttribute)
 		return schemaResource.ObjectAttribute{
 			Computed:            true,
 			AttributeTypes:      attr.AttributeTypes,
@@ -162,7 +151,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.MapAttribute:
-		attr := attr.(schemaResource.MapAttribute)
 		return schemaResource.MapAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -174,7 +162,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		}
 
 	case schemaResource.SingleNestedAttribute:
-		attr := attr.(schemaResource.SingleNestedAttribute)
 		o := schemaResource.SingleNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -189,7 +176,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		return o
 
 	case schemaResource.ListNestedAttribute:
-		attr := attr.(schemaResource.ListNestedAttribute)
 		o := schemaResource.ListNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -207,7 +193,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		return o
 
 	case schemaResource.SetNestedAttribute:
-		attr := attr.(schemaResource.SetNestedAttribute)
 		o := schemaResource.SetNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -225,7 +210,6 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 		return o
 
 	case schemaResource.MapNestedAttribute:
-		attr := attr.(schemaResource.MapNestedAttribute)
 		o := schemaResource.MapNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -248,9 +232,8 @@ func newReadOnlyResourceAttrFromResourceAttr(attr schemaResource.Attribute) sche
 }
 
 func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) schemaDataSource.Attribute {
-	switch attr.(type) {
+	switch attr := attr.(type) {
 	case schemaResource.StringAttribute:
-		attr := attr.(schemaResource.StringAttribute)
 		return schemaDataSource.StringAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -261,7 +244,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.BoolAttribute:
-		attr := attr.(schemaResource.BoolAttribute)
 		return schemaDataSource.BoolAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -272,7 +254,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.Float32Attribute:
-		attr := attr.(schemaResource.Float32Attribute)
 		return schemaDataSource.Float32Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -283,7 +264,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.Float64Attribute:
-		attr := attr.(schemaResource.Float64Attribute)
 		return schemaDataSource.Float64Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -294,7 +274,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.Int32Attribute:
-		attr := attr.(schemaResource.Int32Attribute)
 		return schemaDataSource.Int32Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -305,7 +284,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.Int64Attribute:
-		attr := attr.(schemaResource.Int64Attribute)
 		return schemaDataSource.Int64Attribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -316,7 +294,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.NumberAttribute:
-		attr := attr.(schemaResource.NumberAttribute)
 		return schemaDataSource.NumberAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -327,7 +304,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.DynamicAttribute:
-		attr := attr.(schemaResource.DynamicAttribute)
 		return schemaDataSource.DynamicAttribute{
 			Computed:            true,
 			CustomType:          attr.CustomType,
@@ -338,7 +314,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.ListAttribute:
-		attr := attr.(schemaResource.ListAttribute)
 		return schemaDataSource.ListAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -350,7 +325,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.SetAttribute:
-		attr := attr.(schemaResource.SetAttribute)
 		return schemaDataSource.SetAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -362,7 +336,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.ObjectAttribute:
-		attr := attr.(schemaResource.ObjectAttribute)
 		return schemaDataSource.ObjectAttribute{
 			Computed:            true,
 			AttributeTypes:      attr.AttributeTypes,
@@ -374,7 +347,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.MapAttribute:
-		attr := attr.(schemaResource.MapAttribute)
 		return schemaDataSource.MapAttribute{
 			Computed:            true,
 			ElementType:         attr.ElementType,
@@ -386,7 +358,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		}
 
 	case schemaResource.SingleNestedAttribute:
-		attr := attr.(schemaResource.SingleNestedAttribute)
 		o := schemaDataSource.SingleNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -401,7 +372,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		return o
 
 	case schemaResource.ListNestedAttribute:
-		attr := attr.(schemaResource.ListNestedAttribute)
 		o := schemaDataSource.ListNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -419,7 +389,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		return o
 
 	case schemaResource.SetNestedAttribute:
-		attr := attr.(schemaResource.SetNestedAttribute)
 		o := schemaDataSource.SetNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
@@ -437,7 +406,6 @@ func newReadOnlyDataSourceAttrFromResourceAttr(attr schemaResource.Attribute) sc
 		return o
 
 	case schemaResource.MapNestedAttribute:
-		attr := attr.(schemaResource.MapNestedAttribute)
 		o := schemaDataSource.MapNestedAttribute{
 			Computed:            true,
 			Description:         attr.Description,
