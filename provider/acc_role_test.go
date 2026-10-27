@@ -261,4 +261,46 @@ resource "neon_role" "this" {
 				},
 			})
 	})
+
+	t.Run("shall import the role", func(t *testing.T) {
+		t.Skip("TODO")
+		// test covers the use case in the issue https://github.com/kislerdm/terraform-provider-neon/issues/108
+		projectName := newProjectName(projectNamePrefix)
+		respCreateProject, err := client.CreateProject(neon.ProjectCreateRequest{
+			Project: neon.ProjectCreateRequestProject{Name: &projectName},
+		})
+		assert.NoError(t, err)
+		waitUnfinishedOperations(context.TODO(), client, respCreateProject.OperationsResponse.Operations)
+
+		projectID := respCreateProject.Project.ID
+		branchID := respCreateProject.Branch.ID
+		const roleName = "foo"
+		respCreateRole, err := client.CreateProjectBranchRole(projectID, branchID, neon.RoleCreateRequest{
+			Role: neon.RoleCreateRequestRole{Name: roleName},
+		})
+		assert.NoError(t, err)
+		waitUnfinishedOperations(context.TODO(), client, respCreateRole.OperationsResponse.Operations)
+
+		resourceDefinition := fmt.Sprintf(`resource "neon_role" "this" {
+  name       = %q
+  project_id = %q
+  branch_id  = %q
+}`, roleName, projectID, branchID)
+
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: newProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					ResourceName:  "neon_role.this",
+					Config:        resourceDefinition,
+					ImportState:   true,
+					ImportStateId: fmt.Sprintf("%s/%s/%s", projectID, branchID, roleName),
+				},
+				{
+					Config:   resourceDefinition,
+					PlanOnly: true,
+				},
+			},
+		})
+	})
 }
