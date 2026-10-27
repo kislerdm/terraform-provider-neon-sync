@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	neon "github.com/kislerdm/neon-sdk-go"
@@ -355,14 +356,16 @@ type projectQuota struct {
 }
 
 type neonProjectResource struct {
-	client *neon.Client
+	client          *neon.Client
+	endpointHandler *neonEndpointResource
+	branchHandler   *neonBranchResource
 }
 
 func (r neonProjectResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = "neon_project"
 }
 
-func (r *neonProjectResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *neonProjectResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -377,6 +380,18 @@ func (r *neonProjectResource) Configure(_ context.Context, req resource.Configur
 		return
 	}
 	r.client = client.sdk
+
+	r.endpointHandler = &neonEndpointResource{}
+	r.endpointHandler.Configure(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	r.branchHandler = &neonBranchResource{}
+	r.branchHandler.Configure(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -649,6 +664,46 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 	if state.Name.ValueStringPointer() != nil && state.Name.ValueString() != "" {
 		cfg.Project.Name = state.Name.ValueStringPointer()
 	}
+	if !state.OrgID.IsNull() && !state.OrgID.IsUnknown() && state.OrgID.ValueString() != "" {
+		cfg.Project.OrgID = state.OrgID.ValueStringPointer()
+	}
+	if !state.RegionID.IsNull() && !state.RegionID.IsUnknown() && state.RegionID.ValueString() != "" {
+		cfg.Project.RegionID = state.RegionID.ValueStringPointer()
+	}
+	if !state.PgVersion.IsNull() && !state.PgVersion.IsUnknown() && state.PgVersion.ValueInt32() != 0 {
+		cfg.Project.PgVersion = pointer(neon.PgVersion(state.PgVersion.ValueInt32()))
+	}
+	if !state.StorePassword.IsNull() && !state.StorePassword.IsUnknown() {
+		cfg.Project.StorePasswords = state.StorePassword.ValueBoolPointer()
+	}
+	if !state.HistoryRetentionSeconds.IsNull() && !state.HistoryRetentionSeconds.IsUnknown() {
+		cfg.Project.HistoryRetentionSeconds = state.HistoryRetentionSeconds.ValueInt32Pointer()
+	}
+	if !state.ComputeProvisioner.IsNull() && !state.ComputeProvisioner.IsUnknown() {
+		cfg.Project.Provisioner = pointer(neon.Provisioner(state.ComputeProvisioner.ValueString()))
+	}
+
+	if !state.AutoscalingLimitMinCU.IsNull() && !state.AutoscalingLimitMinCU.IsUnknown() {
+		if cfg.Project.DefaultEndpointSettings == nil {
+			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		cfg.Project.DefaultEndpointSettings.AutoscalingLimitMinCu =
+			pointer(neon.ComputeUnit(state.AutoscalingLimitMinCU.ValueFloat64()))
+	}
+	if !state.AutoscalingLimitMaxCU.IsNull() && !state.AutoscalingLimitMaxCU.IsUnknown() {
+		if cfg.Project.DefaultEndpointSettings == nil {
+			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		cfg.Project.DefaultEndpointSettings.AutoscalingLimitMaxCu =
+			pointer(neon.ComputeUnit(state.AutoscalingLimitMaxCU.ValueFloat64()))
+	}
+	if !state.SuspendTimeoutSeconds.IsNull() && !state.SuspendTimeoutSeconds.IsUnknown() {
+		if cfg.Project.DefaultEndpointSettings == nil {
+			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		cfg.Project.DefaultEndpointSettings.SuspendTimeoutSeconds =
+			pointer(neon.SuspendTimeoutSeconds(state.SuspendTimeoutSeconds.ValueInt64()))
+	}
 
 	if state.MaintenanceWindow != nil {
 		if cfg.Project.Settings == nil {
@@ -682,12 +737,25 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	primaryComputeSettings := state.PrimaryCompute
+
 	defaultEndpoint := findDefaultEndpoint(endpoints, defaultBranch.ID)
 	defaultDatabase := findDefaultDatabase(databases, defaultBranch.ID)
-
 	state.inferAttr(ctx, project, defaultBranch, defaultEndpoint, defaultDatabase, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// set custom config for the primary compute
+	if primaryComputeSettings != nil && defaultEndpoint.ID != "" {
+		state.PrimaryCompute = r.updatePrimaryCompute(ctx, state.PrimaryCompute, primaryComputeSettings, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -862,6 +930,13 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
+	if plan.PrimaryCompute != nil {
+		plan.PrimaryCompute = r.updatePrimaryCompute(ctx, prior.PrimaryCompute, plan.PrimaryCompute, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -910,4 +985,38 @@ func (r neonProjectResource) ImportState(ctx context.Context, req resource.Impor
 	if resp.State.Raw.IsNull() {
 		resp.Diagnostics.AddError("project not found", "")
 	}
+}
+
+func (r neonProjectResource) updatePrimaryCompute(ctx context.Context, prior *neonEndpointResourceModel,
+	plan *neonEndpointResourceModel, diagnostics *diag.Diagnostics) *neonEndpointResourceModel {
+	schemaResp := resource.SchemaResponse{}
+	r.endpointHandler.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	diagnostics.Append(schemaResp.Diagnostics...)
+	if diagnostics.HasError() {
+		return nil
+	}
+
+	updateReq := resource.UpdateRequest{
+		State: tfsdk.State{Schema: schemaResp.Schema},
+		Plan:  tfsdk.Plan{Schema: schemaResp.Schema},
+	}
+	diagnostics.Append(updateReq.State.Set(ctx, prior)...)
+	diagnostics.Append(updateReq.Plan.Set(ctx, plan)...)
+	if diagnostics.HasError() {
+		return nil
+	}
+
+	updateResp := resource.UpdateResponse{State: updateReq.State}
+	r.endpointHandler.Update(ctx, updateReq, &updateResp)
+	diagnostics.Append(updateResp.Diagnostics...)
+	if diagnostics.HasError() {
+		return nil
+	}
+
+	var newState = new(neonEndpointResourceModel)
+	diagnostics.Append(updateResp.State.Get(ctx, newState)...)
+	if diagnostics.HasError() {
+		return nil
+	}
+	return newState
 }
