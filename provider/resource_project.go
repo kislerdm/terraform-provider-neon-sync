@@ -394,7 +394,7 @@ func (r *neonProjectResource) Configure(ctx context.Context, req resource.Config
 	}
 }
 
-func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r neonProjectResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	attrs := map[string]schema.Attribute{
 		"id": schema.StringAttribute{
 			Description: "Project ID.",
@@ -543,9 +543,10 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		},
 	}
 
-	projectEndpointSchemaAttributes := maps.Clone(endpointSchemaAttributes)
-
-	// redefine some of the endpoint's attributes to be read-only
+	endpointSchemaResp := resource.SchemaResponse{}
+	endpointResource := &neonEndpointResource{}
+	endpointResource.Schema(ctx, resource.SchemaRequest{}, &endpointSchemaResp)
+	projectEndpointSchemaAttributes := maps.Clone(endpointSchemaResp.Schema.Attributes)
 	for _, name := range []string{"project_id", "branch_id", "region_id", "type"} {
 		if _, ok := projectEndpointSchemaAttributes[name]; ok {
 			projectEndpointSchemaAttributes[name] =
@@ -553,7 +554,10 @@ func (r neonProjectResource) Schema(_ context.Context, _ resource.SchemaRequest,
 		}
 	}
 
-	projectBranchSchemaAttributes := maps.Clone(branchSchemaAttributes)
+	branchSchemaResp := resource.SchemaResponse{}
+	branchResource := &neonBranchResource{}
+	branchResource.Schema(ctx, resource.SchemaRequest{}, &branchSchemaResp)
+	projectBranchSchemaAttributes := maps.Clone(branchSchemaResp.Schema.Attributes)
 	for _, name := range []string{"project_id"} {
 		if _, ok := projectBranchSchemaAttributes[name]; ok {
 			projectBranchSchemaAttributes[name] =

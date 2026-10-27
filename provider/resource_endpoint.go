@@ -138,108 +138,106 @@ func (r *neonEndpointResource) Metadata(_ context.Context, _ resource.MetadataRe
 	resp.TypeName = "neon_endpoint"
 }
 
-var endpointSchemaAttributes = map[string]schema.Attribute{
-	"id": schema.StringAttribute{
-		Description: "Endpoint ID.",
-		Computed:    true,
-	},
-	"project_id": schema.StringAttribute{
-		Description:   "Project ID.",
-		Required:      true,
-		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-	},
-	"branch_id": schema.StringAttribute{
-		Description:   "Branch ID.",
-		Required:      true,
-		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-	},
-	"region_id": schema.StringAttribute{
-		MarkdownDescription: `Cloud region where the resource's Postgres compute and storage reside.
+func (r *neonEndpointResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: `Project Endpoint. See details: https://neon.tech/docs/manage/endpoints/`,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Description: "Endpoint ID.",
+				Computed:    true,
+			},
+			"project_id": schema.StringAttribute{
+				Description:   "Project ID.",
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
+			"branch_id": schema.StringAttribute{
+				Description:   "Branch ID.",
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
+			"region_id": schema.StringAttribute{
+				MarkdownDescription: `Cloud region where the resource's Postgres compute and storage reside.
 Find the list here: https://neon.com/docs/introduction/regions.
 Alternatively, use the data source ` + "`neon_active_regions`.",
-		Optional:      true,
-		Computed:      true,
-		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-	},
-	"name": schema.StringAttribute{
-		Description: "Name of the compute endpoint.",
-		Optional:    true,
-		Computed:    true,
-	},
-	"type": schema.StringAttribute{
-		Description: "Compute endpoint type.",
-		Optional:    true,
-		Computed:    true,
-		Default:     stringdefault.StaticString(neon.EndpointTypeReadWrite.String()),
-		Validators:  []validator.String{validateEndpointType},
-	},
-	"autoscaling_limit_min_cu": schema.Float64Attribute{
-		Description: "Minimum compute units for autoscaling.",
-		Optional:    true,
-		Computed:    true,
-	},
-	"autoscaling_limit_max_cu": schema.Float64Attribute{
-		Description: "Maximum compute units for autoscaling.",
-		Optional:    true,
-		Computed:    true,
-	},
-	"suspend_timeout_seconds": schema.Int64Attribute{
-		MarkdownDescription: "Scale-to-zero idle timeout, in seconds, before the compute suspends.\n" +
-			"   - `0` means the plan default (`300` sec.) applies;\n" +
-			"   - `-1` means scale-to-zero is disabled (never suspends), can be set only on paid plans;\n" +
-			"   - `604800` sec. (1 week) is the maximum.\n" +
-			"   - `60` sec. (1 minute) is the minimum.\n" +
-			"See details [here](https://neon.com/docs/manage/endpoints#scale-to-zero-configuration).",
-		Validators: []validator.Int64{validateSuspendTimeout},
-		Optional:   true,
-		Computed:   true,
-	},
-	"compute_provisioner": schema.StringAttribute{
-		Description: "Compute provisioner: `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
-		Optional:    true,
-		Computed:    true,
-		Default:     stringdefault.StaticString("k8s-neonvm"),
-		Validators:  []validator.String{validateComputeProvisioner},
-	},
-	"disabled": schema.BoolAttribute{
-		Description: `Whether to restrict connections to the compute endpoint.
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
+			"name": schema.StringAttribute{
+				Description: "Name of the compute endpoint.",
+				Optional:    true,
+				Computed:    true,
+			},
+			"type": schema.StringAttribute{
+				Description: "Compute endpoint type.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(neon.EndpointTypeReadWrite.String()),
+				Validators:  []validator.String{validateEndpointType},
+			},
+			"autoscaling_limit_min_cu": schema.Float64Attribute{
+				Description: "Minimum compute units for autoscaling.",
+				Optional:    true,
+				Computed:    true,
+			},
+			"autoscaling_limit_max_cu": schema.Float64Attribute{
+				Description: "Maximum compute units for autoscaling.",
+				Optional:    true,
+				Computed:    true,
+			},
+			"suspend_timeout_seconds": schema.Int64Attribute{
+				MarkdownDescription: "Scale-to-zero idle timeout, in seconds, before the compute suspends.\n" +
+					"   - `0` means the plan default (`300` sec.) applies;\n" +
+					"   - `-1` means scale-to-zero is disabled (never suspends), can be set only on paid plans;\n" +
+					"   - `604800` sec. (1 week) is the maximum.\n" +
+					"   - `60` sec. (1 minute) is the minimum.\n" +
+					"See details [here](https://neon.com/docs/manage/endpoints#scale-to-zero-configuration).",
+				Validators: []validator.Int64{validateSuspendTimeout},
+				Optional:   true,
+				Computed:   true,
+			},
+			"compute_provisioner": schema.StringAttribute{
+				Description: "Compute provisioner: `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("k8s-neonvm"),
+				Validators:  []validator.String{validateComputeProvisioner},
+			},
+			"disabled": schema.BoolAttribute{
+				Description: `Whether to restrict connections to the compute endpoint.
 	Enabling this option schedules a suspend compute operation.
 	A disabled compute endpoint cannot be enabled by a connection or
 	console action. However, the compute endpoint is periodically
 	enabled by check_availability operations.`,
-		Optional: true,
-		Computed: true,
-	},
-	"enabled_libraries": schema.ListAttribute{
-		Description: "Names of shared preload libraries to enable for the project.",
-		Optional:    true,
-		Computed:    true,
-		ElementType: types.StringType,
-	},
-	"enabled_libraries_use_defaults": schema.BoolAttribute{
-		Description: "When true, the project's preload libraries include the platform default set in addition to any libraries listed in `enabled_libraries`.",
-		Optional:    true,
-		Computed:    true,
-	},
-	"passwordless_access": schema.BoolAttribute{
-		Description: "When true, the endpoint allows passwordless access.",
-		Optional:    true,
-		Computed:    true,
-	},
-	"host": schema.StringAttribute{
-		Description: "The hostname of the compute endpoint.",
-		Computed:    true,
-	},
-	"host_pooler": schema.StringAttribute{
-		Description: "The hostname of the compute endpoint accessible through the connection pool (pgbouncer).",
-		Computed:    true,
-	},
-}
-
-func (r *neonEndpointResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	resp.Schema = schema.Schema{
-		Description: `Project Endpoint. See details: https://neon.tech/docs/manage/endpoints/`,
-		Attributes:  endpointSchemaAttributes,
+				Optional: true,
+				Computed: true,
+			},
+			"enabled_libraries": schema.ListAttribute{
+				Description: "Names of shared preload libraries to enable for the project.",
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"enabled_libraries_use_defaults": schema.BoolAttribute{
+				Description: "When true, the project's preload libraries include the platform default set in addition to any libraries listed in `enabled_libraries`.",
+				Optional:    true,
+				Computed:    true,
+			},
+			"passwordless_access": schema.BoolAttribute{
+				Description: "When true, the endpoint allows passwordless access.",
+				Optional:    true,
+				Computed:    true,
+			},
+			"host": schema.StringAttribute{
+				Description: "The hostname of the compute endpoint.",
+				Computed:    true,
+			},
+			"host_pooler": schema.StringAttribute{
+				Description: "The hostname of the compute endpoint accessible through the connection pool (pgbouncer).",
+				Computed:    true,
+			},
+		},
 	}
 }
 

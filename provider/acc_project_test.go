@@ -1,12 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strconv"
 	"testing"
 
+	tfResource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	neon "github.com/kislerdm/neon-sdk-go"
@@ -325,6 +327,16 @@ func TestProject(t *testing.T) {
 	t.Parallel()
 
 	t.Run("shall create a project w/ default configs only", func(t *testing.T) {
+		endpointSchemaResp := tfResource.SchemaResponse{}
+		endpointResource := &neonEndpointResource{}
+		endpointResource.Schema(context.TODO(), tfResource.SchemaRequest{}, &endpointSchemaResp)
+		endpointSchemaAttributes := endpointSchemaResp.Schema.Attributes
+
+		branchSchemaResp := tfResource.SchemaResponse{}
+		branchResource := &neonBranchResource{}
+		branchResource.Schema(context.TODO(), tfResource.SchemaRequest{}, &branchSchemaResp)
+		branchSchemaAttributes := branchSchemaResp.Schema.Attributes
+
 		resource.Test(
 			t, resource.TestCase{
 				ProtoV6ProviderFactories: newProviderFactories(),

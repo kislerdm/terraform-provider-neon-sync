@@ -60,56 +60,54 @@ func (r *neonBranchResource) Metadata(_ context.Context, _ resource.MetadataRequ
 	resp.TypeName = "neon_branch"
 }
 
-var branchSchemaAttributes = map[string]schema.Attribute{
-	"id": schema.StringAttribute{
-		Computed:    true,
-		Description: "Branch ID.",
-	},
-	"project_id": schema.StringAttribute{
-		Required:      true,
-		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-		Description:   "Project ID",
-	},
-	"name": schema.StringAttribute{
-		Optional:    true,
-		Computed:    true,
-		Description: "The branch name.",
-	},
-	"parent_id": schema.StringAttribute{
-		Optional:    true,
-		Computed:    true,
-		Description: "The ID of the branch to check out.",
-	},
-	"parent_lsn": schema.StringAttribute{
-		Optional: true,
-		Computed: true,
-		Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_timestamp**.`,
-	},
-	"parent_timestamp": schema.Int64Attribute{
-		Optional:   true,
-		Computed:   true,
-		Validators: []validator.Int64{notNegativeInt64},
-		Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
-See details: https://neon.tech/docs/reference/glossary/#lsn
-**Conflicts with parent_lsn**.`,
-	},
-	"logical_size": schema.Int64Attribute{
-		Computed:    true,
-		Description: "Branch logical size in MB.",
-	},
-	"protected": schema.BoolAttribute{
-		Optional:    true,
-		Computed:    true,
-		Description: "Set whether the branch is protected.",
-	},
-}
-
 func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
-		Attributes:  branchSchemaAttributes,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "Branch ID.",
+			},
+			"project_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Description:   "Project ID",
+			},
+			"name": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "The branch name.",
+			},
+			"parent_id": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "The ID of the branch to check out.",
+			},
+			"parent_lsn": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+See details: https://neon.tech/docs/reference/glossary/#lsn
+**Conflicts with parent_timestamp**.`,
+			},
+			"parent_timestamp": schema.Int64Attribute{
+				Optional:   true,
+				Computed:   true,
+				Validators: []validator.Int64{notNegativeInt64},
+				Description: `Log Sequence Number (LSN) horizon for the data to be present in the new branch.
+See details: https://neon.tech/docs/reference/glossary/#lsn
+**Conflicts with parent_lsn**.`,
+			},
+			"logical_size": schema.Int64Attribute{
+				Computed:    true,
+				Description: "Branch logical size in MB.",
+			},
+			"protected": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Set whether the branch is protected.",
+			},
+		},
 	}
 }
 
