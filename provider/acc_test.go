@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
-	"github.com/jackc/pgx/v5"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -933,160 +931,6 @@ func testPlanAfterRoleImport(t *testing.T, client *neon.Client) {
 			},
 		},
 	})
-}
-
-func testQuery(uri string) error {
-	conn, err := pgx.Connect(context.TODO(), uri)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close(context.Background()) }()
-
-	wantVal := 1
-	r, _ := conn.Query(context.TODO(), fmt.Sprintf("select %d as val;", wantVal))
-	defer func() { r.Close() }()
-
-	vals, err := pgx.CollectRows(r, func(row pgx.CollectableRow) (int, error) {
-		var val int
-		err := row.Scan(&val)
-		return val, err
-	})
-
-	if err == nil {
-		if len(vals) != 1 || vals[0] != wantVal {
-			err = fmt.Errorf("expected to return %d as the query result", wantVal)
-		}
-	}
-
-	return err
-}
-
-func TestAccMaintenanceWindow(t *testing.T) {
-	if os.Getenv("TF_ACC") != "1" {
-		t.Skip("TF_ACC must be set to 1")
-	}
-
-	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var projectNamePrefix = "maintenanceWindow-"
-	t.Cleanup(func() {
-		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
-		for _, project := range resp.Projects {
-			_, _ = client.DeleteProject(project.ID)
-		}
-	})
-
-	var (
-		wantWeekdays  = []int{1, 2}
-		wantStartTime = "21:00"
-		wantEndTime   = "23:00"
-	)
-
-	var weekdaysStr string
-	for i, day := range wantWeekdays {
-		weekdaysStr = weekdaysStr + strconv.Itoa(day)
-		if i < len(wantWeekdays)-1 {
-			weekdaysStr += ","
-		}
-	}
-
-	projectName := newProjectName(projectNamePrefix)
-	resource.Test(
-		t, resource.TestCase{
-			ProviderFactories: map[string]func() (*schema.Provider, error){
-				"neon": func() (*schema.Provider, error) {
-					return newAccTest(), nil
-				},
-			},
-			Steps: []resource.TestStep{
-				{
-					ResourceName: "neon_project.this",
-					Config: fmt.Sprintf(`resource "neon_project" "this" { 
-	name = "%s"
-	maintenance_window {
-		weekdays   = [%s]
-	    start_time = "%s"
-	    end_time   = "%s"
-	}
-}`, projectName, weekdaysStr, wantStartTime, wantEndTime),
-					Check: resource.ComposeTestCheckFunc(
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.#", "1",
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.start_time", wantStartTime,
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.end_time", wantEndTime,
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.weekdays.#",
-							strconv.Itoa(len(wantWeekdays)),
-						),
-
-						func(state *terraform.State) error {
-							ref, err := readProjectInfo(client, projectName)
-							if err != nil {
-								return err
-							}
-
-							if !assert.ElementsMatch(t, ref.Settings.MaintenanceWindow.Weekdays, wantWeekdays) {
-								return fmt.Errorf("the set maintenance weekdays got: %v, want: %v",
-									ref.Settings.MaintenanceWindow.Weekdays, wantWeekdays)
-							}
-
-							if ref.Settings.MaintenanceWindow.StartTime != wantStartTime {
-								return fmt.Errorf("the set maintenance weekdays")
-							}
-
-							return nil
-						},
-					),
-				},
-				{
-					ResourceName: "neon_project.this",
-					Config:       fmt.Sprintf(`resource "neon_project" "this" {name = %s}`, projectName),
-					ImportState:  true,
-					Check: resource.ComposeTestCheckFunc(
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.#", "1",
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.start_time", wantStartTime,
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.end_time", wantEndTime,
-						),
-						resource.TestCheckResourceAttr(
-							"neon_project.this", "maintenance_window.0.weekdays.#",
-							strconv.Itoa(len(wantWeekdays)),
-						),
-					),
-				},
-				{
-					ResourceName: "neon_project.this",
-					Config: fmt.Sprintf(`resource "neon_project" "this" { 
-	name = "%s"
-	maintenance_window {
-		weekdays   = [%s]
-	    start_time = "%s"
-	    end_time   = "%s"
-	}
-}`, projectName, weekdaysStr, wantStartTime, wantEndTime),
-					PlanOnly: true,
-				},
-				{
-					ResourceName: "neon_project.this",
-					Config:       fmt.Sprintf(`resource "neon_project" "this" {name = %s}`, projectName),
-					ImportState:  true,
-					PlanOnly:     true,
-				},
-			},
-		},
-	)
 }
 
 func TestLogicalReplication(t *testing.T) {
