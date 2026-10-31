@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -25,6 +26,7 @@ import (
 )
 
 var _ resource.ResourceWithConfigure = (*neonProjectResource)(nil)
+var _ resource.ResourceWithModifyPlan = (*neonProjectResource)(nil)
 var _ resource.ResourceWithImportState = (*neonProjectResource)(nil)
 
 func NewNeonProjectResource() resource.Resource {
@@ -169,6 +171,7 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 	v.Hipaa = types.BoolNull()
 
 	v.AllowedIPsProtectedBranchesOnly = types.BoolNull()
+	previousAllowedIPs := v.AllowedIPs
 	v.AllowedIPs = types.ListNull(types.StringType)
 
 	v.EnabledLibraries = types.ListNull(types.StringType)
@@ -194,6 +197,15 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 			}
 		}
 
+		// The API represents both an omitted allowlist and an explicit [] as empty.
+		// Preserve a known list as [], while preserving a null manifest value as null.
+		if v.AllowedIPs.IsNull() &&
+			!previousAllowedIPs.IsNull() &&
+			!previousAllowedIPs.IsUnknown() {
+			v.AllowedIPs, d = types.ListValueFrom(ctx, types.StringType, []string{})
+			diagnostics.Append(d...)
+		}
+
 		if v.Quota != nil && settings.Quota != nil {
 			v.Quota = &projectQuota{
 				ActiveTimeSeconds:  types.Int64PointerValue(settings.Quota.ActiveTimeSeconds),
@@ -212,7 +224,7 @@ func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.P
 			}
 		}
 
-		if v.MaintenanceWindow != nil {
+		if settings.MaintenanceWindow != nil {
 			v.MaintenanceWindow = &maintenanceWindow{
 				StartTime: types.StringValue(settings.MaintenanceWindow.StartTime),
 				EndTime:   types.StringValue(settings.MaintenanceWindow.EndTime),
@@ -391,6 +403,25 @@ func (r *neonProjectResource) Configure(ctx context.Context, req resource.Config
 	r.branchHandler.Configure(ctx, req, resp)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+}
+
+func (r *neonProjectResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	attrPath := path.Root("allowed_ips_protected_branches_only")
+	var config, state types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, attrPath, &config)...)
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, attrPath, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if config.IsNull() && !state.IsNull() && !state.IsUnknown() && state.ValueBool() {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, attrPath, types.BoolValue(false))...)
 	}
 }
 
@@ -746,9 +777,6 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 		}
 		cfg.Project.Settings.AllowedIps.ProtectedBranchesOnly = state.AllowedIPsProtectedBranchesOnly.ValueBoolPointer()
 	}
-
-	// TODO: add the request config inference
-
 	var project neon.Project
 	var defaultBranch neon.Branch
 	var endpoints []neon.Endpoint
@@ -913,7 +941,8 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	var plan, prior neonProjectResourceModel
+	var config, plan, prior neonProjectResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &prior)...)
 	if resp.Diagnostics.HasError() {
@@ -948,6 +977,36 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 		}
 	}
 
+	if !plan.AllowedIPs.Equal(prior.AllowedIPs) {
+		allowedIPs := []string{}
+
+		if !plan.AllowedIPs.IsNull() && !plan.AllowedIPs.IsUnknown() {
+			resp.Diagnostics.Append(plan.AllowedIPs.ElementsAs(ctx, &allowedIPs, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		if cfg.Project.Settings.AllowedIps == nil {
+			cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
+		}
+		cfg.Project.Settings.AllowedIps.Ips = allowedIPs
+	}
+
+	if !plan.AllowedIPsProtectedBranchesOnly.IsUnknown() &&
+		!plan.AllowedIPsProtectedBranchesOnly.Equal(prior.AllowedIPsProtectedBranchesOnly) {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		if cfg.Project.Settings.AllowedIps == nil {
+			cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
+		}
+		cfg.Project.Settings.AllowedIps.ProtectedBranchesOnly = plan.AllowedIPsProtectedBranchesOnly.ValueBoolPointer()
+	}
+
 	// TODO: add the request config inference
 
 	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
@@ -962,7 +1021,7 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	if plan.PrimaryCompute != nil {
+	if config.PrimaryCompute != nil && plan.PrimaryCompute != nil && prior.PrimaryCompute != nil {
 		plan.PrimaryCompute = r.updatePrimaryCompute(ctx, prior.PrimaryCompute, plan.PrimaryCompute, &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
