@@ -522,11 +522,12 @@ func (r neonProjectResource) Schema(ctx context.Context, _ resource.SchemaReques
 			Validators: []validator.Int64{validateSuspendTimeout},
 		},
 		"compute_provisioner": schema.StringAttribute{
-			Description: "Project-wide compute provisioner. `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
-			Optional:    true,
-			Computed:    true,
-			Default:     stringdefault.StaticString("k8s-neonvm"),
-			Validators:  []validator.String{validateComputeProvisioner},
+			Description:   "Project-wide compute provisioner. `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
+			Optional:      true,
+			Computed:      true,
+			Default:       stringdefault.StaticString("k8s-neonvm"),
+			PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			Validators:    []validator.String{validateComputeProvisioner},
 		},
 		"hipaa": schema.BoolAttribute{
 			Description:   "Enable HIPAA compliance for the project.\nNote that HIPAA must be configured for the organization first.\n\n**Warning**: Once enabled, HIPAA cannot be disabled.",
@@ -952,6 +953,9 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 	var cfg neon.ProjectUpdateRequest
 	if !prior.Name.Equal(plan.Name) && plan.Name.ValueString() != "" {
 		cfg.Project.Name = plan.Name.ValueStringPointer()
+	}
+	if !plan.HistoryRetentionSeconds.Equal(prior.HistoryRetentionSeconds) {
+		cfg.Project.HistoryRetentionSeconds = plan.HistoryRetentionSeconds.ValueInt32Pointer()
 	}
 
 	var updateMaintenanceWindow bool
