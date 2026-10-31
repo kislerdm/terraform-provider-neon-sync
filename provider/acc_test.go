@@ -1,11 +1,13 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/jackc/pgx/v5"
 	neon "github.com/kislerdm/neon-sdk-go"
 	"github.com/stretchr/testify/assert"
 )
@@ -42,9 +45,13 @@ func TestAcc(t *testing.T) {
 
 	end2end(t, client)
 
+	projectAllowedIPs(t, client)
+
 	fetchDataSources(t)
 
 	issue83(t)
+
+	testPlanAfterRoleImport(t, client)
 }
 
 func end2end(t *testing.T, client *neon.Client) {
@@ -497,6 +504,178 @@ resource "neon_database" "this" {
 	)
 }
 
+func projectAllowedIPs(t *testing.T, client *neon.Client) {
+	t.Skip("skipped because the Business plan is required for the feature")
+	wantAllowedIPs := []string{"192.168.1.0", "192.168.2.0/24"}
+	ips := `["` + strings.Join(wantAllowedIPs, `", "`) + `"]`
+
+	t.Run("shall provision a project with a custom list of allowed IPs", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefixOverall)
+
+		resourceDefinition := fmt.Sprintf(`resource "neon_project" "this" {
+			name      				  = "%s"
+			region_id 				  = "aws-us-west-2"
+			pg_version				  = 16
+			allowed_ips               = %s
+		}`, projectName, ips)
+
+		const resourceNameProject = "neon_project.this"
+		resource.Test(
+			t, resource.TestCase{
+				ProviderFactories: map[string]func() (*schema.Provider, error){
+					"neon": func() (*schema.Provider, error) {
+						return newAccTest(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						ResourceName: "project",
+						Config:       resourceDefinition,
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"name", projectName,
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.#", fmt.Sprintf("%d", len(wantAllowedIPs)),
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.0", wantAllowedIPs[0],
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.1", wantAllowedIPs[1],
+							),
+							resource.TestCheckNoResourceAttr(
+								resourceNameProject, "enable_logical_replication",
+							),
+							resource.TestCheckNoResourceAttr(
+								resourceNameProject, "allowed_ips_protected_branches_only",
+							),
+
+							// check the project and its settings
+							func(state *terraform.State) error {
+								ref, err := readProjectInfo(client, projectName)
+								if err != nil {
+									return err
+								}
+
+								var exceedingAllowedIPs []string
+								missingIPs := map[string]struct{}{}
+								for _, ip := range wantAllowedIPs {
+									missingIPs[ip] = struct{}{}
+								}
+
+								for _, ip := range ref.Settings.AllowedIps.Ips {
+									if _, ok := missingIPs[ip]; ok {
+										delete(missingIPs, ip)
+										continue
+									}
+									exceedingAllowedIPs = append(exceedingAllowedIPs, ip)
+								}
+
+								if len(exceedingAllowedIPs) > 0 || len(missingIPs) > 0 {
+									return fmt.Errorf("unexpected allowed ips. want=%v, got=%v",
+										wantAllowedIPs, ref.Settings.AllowedIps.Ips)
+								}
+
+								return nil
+							},
+						),
+					},
+				},
+			},
+		)
+	})
+
+	t.Run("shall provision a project with a custom list of allowed IPs set for protected branch only", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefixOverall)
+
+		resourceDefinition := fmt.Sprintf(`resource "neon_project" "this" {
+			name      				  = "%s"
+			region_id 				  = "aws-us-west-2"
+			pg_version				  = 16
+			allowed_ips               = %s
+			allowed_ips_protected_branches_only = "yes"
+		}`, projectName, ips)
+
+		const resourceNameProject = "neon_project.this"
+		resource.Test(
+			t, resource.TestCase{
+				ProviderFactories: map[string]func() (*schema.Provider, error){
+					"neon": func() (*schema.Provider, error) {
+						return newAccTest(), nil
+					},
+				},
+				Steps: []resource.TestStep{
+					{
+						ResourceName: "project",
+						Config:       resourceDefinition,
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"name", projectName,
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.#", fmt.Sprintf("%d", len(wantAllowedIPs)),
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.0", wantAllowedIPs[0],
+							),
+							resource.TestCheckResourceAttr(
+								resourceNameProject,
+								"allowed_ips.1", wantAllowedIPs[1],
+							),
+							resource.TestCheckNoResourceAttr(
+								resourceNameProject, "allowed_ips_protected_branches_only",
+							),
+
+							// check the project and its settings
+							func(state *terraform.State) error {
+								ref, err := readProjectInfo(client, projectName)
+								if err != nil {
+									return err
+								}
+
+								var exceedingAllowedIPs []string
+
+								missingIPs := map[string]struct{}{}
+								for _, ip := range wantAllowedIPs {
+									missingIPs[ip] = struct{}{}
+								}
+
+								for _, ip := range ref.Settings.AllowedIps.Ips {
+									if _, ok := missingIPs[ip]; ok {
+										delete(missingIPs, ip)
+										continue
+									}
+
+									exceedingAllowedIPs = append(exceedingAllowedIPs, ip)
+								}
+
+								if len(exceedingAllowedIPs) > 0 || len(missingIPs) > 0 {
+									return fmt.Errorf("unexpected allowed ips. want=%v, got=%v",
+										wantAllowedIPs, ref.Settings.AllowedIps.Ips)
+								}
+
+								if ref.Settings.AllowedIps.ProtectedBranchesOnly == nil || !*ref.Settings.AllowedIps.ProtectedBranchesOnly {
+									return errors.New("allowed_ips_protected_branches_only is expected to be set to 'true'")
+								}
+
+								return nil
+							},
+						),
+					},
+				},
+			},
+		)
+	})
+}
+
 func fetchDataSources(t *testing.T) {
 	t.Run(
 		"shall successfully fetch project", func(t *testing.T) {
@@ -709,6 +888,309 @@ func mustParseFloat64(s string) float64 {
 		panic(err)
 	}
 	return v
+}
+
+// test covers the use case in the issue https://github.com/kislerdm/terraform-provider-neon/issues/108
+func testPlanAfterRoleImport(t *testing.T, client *neon.Client) {
+	projectName := newProjectName(projectNamePrefixOverall)
+	respCreateProject, err := client.CreateProject(neon.ProjectCreateRequest{
+		Project: neon.ProjectCreateRequestProject{Name: &projectName},
+	})
+	assert.NoError(t, err)
+
+	projectID := respCreateProject.Project.ID
+	branchID := respCreateProject.Branch.ID
+	const roleName = "foo"
+	_, err = client.CreateProjectBranchRole(projectID, branchID, neon.RoleCreateRequest{
+		Role: neon.RoleCreateRequestRole{Name: roleName},
+	})
+	assert.NoError(t, err)
+
+	roleID := complexID{
+		ProjectID: projectID,
+		BranchID:  branchID,
+		Name:      roleName,
+	}
+
+	resourceDefinition := fmt.Sprintf(`resource "neon_role" "this" {
+  name       = "%s"
+  project_id = "%s"
+  branch_id  = "%s"
+}`, roleID.Name, roleID.ProjectID, roleID.BranchID)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: newProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				ResourceName:  "neon_role.this",
+				Config:        resourceDefinition,
+				ImportState:   true,
+				ImportStateId: roleID.toString(),
+			},
+			{
+				Config:   resourceDefinition,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// issue 119: https://github.com/kislerdm/terraform-provider-neon/issues/119
+func TestProjectDefaultEndpointURI(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+
+	projectName := newProjectName("project-defaultURls")
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		resp, _ := client.ListProjects(nil, nil, &projectName, nil, nil, nil)
+		for _, project := range resp.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	resourceDefinition := fmt.Sprintf(`resource "neon_project" "this" { name = "%s"}`, projectName)
+
+	var connectionInfo dbConnectionInfo
+
+	resource.Test(
+		t, resource.TestCase{
+			ProviderFactories: map[string]func() (*schema.Provider, error){
+				"neon": func() (*schema.Provider, error) {
+					return newAccTest(), nil
+				},
+			},
+			Steps: []resource.TestStep{
+				{
+					Config: resourceDefinition,
+					Check: resource.ComposeTestCheckFunc(
+						// verify that the URI w/o pooler is valid
+						resource.TestCheckResourceAttrWith("neon_project.this", "connection_uri",
+							func(value string) error {
+								return testQuery(value)
+							}),
+						// verify that the URI w/ pooler is valid
+						resource.TestCheckResourceAttrWith("neon_project.this", "connection_uri_pooler",
+							func(value string) error {
+								return testQuery(value)
+							}),
+						// verify that the default connection attributes are valid
+						resource.TestCheckResourceAttrWith("neon_project.this", "database_name",
+							func(value string) (err error) {
+								if value != "" {
+									connectionInfo.dbName = value
+								} else {
+									err = fmt.Errorf("non empty value is expected")
+								}
+								return err
+							}),
+						resource.TestCheckResourceAttrWith("neon_project.this", "database_user",
+							func(value string) (err error) {
+								if value != "" {
+									connectionInfo.userName = value
+								} else {
+									err = fmt.Errorf("non empty value is expected")
+								}
+								return err
+							}),
+						resource.TestCheckResourceAttrWith("neon_project.this", "database_password",
+							func(value string) (err error) {
+								if value != "" {
+									connectionInfo.pass = value
+								} else {
+									err = fmt.Errorf("non empty value is expected")
+								}
+								return err
+							}),
+						resource.TestCheckResourceAttrWith("neon_project.this", "database_host",
+							func(value string) (err error) {
+								if value != "" {
+									connectionInfo.host = value
+								} else {
+									err = fmt.Errorf("non empty value is expected")
+								}
+								return err
+							}),
+						resource.TestCheckResourceAttrWith("neon_project.this", "database_host_pooler",
+							func(value string) (err error) {
+								if value != "" {
+									connectionInfo.poolerHost = value
+								} else {
+									err = fmt.Errorf("non empty value is expected")
+								}
+								return err
+							}),
+						func(_ *terraform.State) error {
+							return testQuery(connectionInfo.connectionURI())
+						},
+						func(_ *terraform.State) error {
+							return testQuery(connectionInfo.poolerConnectionURI())
+						},
+					),
+				},
+			},
+		})
+
+}
+
+func testQuery(uri string) error {
+	conn, err := pgx.Connect(context.TODO(), uri)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+
+	wantVal := 1
+	r, _ := conn.Query(context.TODO(), fmt.Sprintf("select %d as val;", wantVal))
+	defer func() { r.Close() }()
+
+	vals, err := pgx.CollectRows(r, func(row pgx.CollectableRow) (int, error) {
+		var val int
+		err := row.Scan(&val)
+		return val, err
+	})
+
+	if err == nil {
+		if len(vals) != 1 || vals[0] != wantVal {
+			err = fmt.Errorf("expected to return %d as the query result", wantVal)
+		}
+	}
+
+	return err
+}
+
+func TestAccMaintenanceWindow(t *testing.T) {
+	if os.Getenv("TF_ACC") != "1" {
+		t.Skip("TF_ACC must be set to 1")
+	}
+
+	client, err := neon.NewClient(neon.Config{Key: os.Getenv("NEON_API_KEY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var projectNamePrefix = "maintenanceWindow-"
+	t.Cleanup(func() {
+		resp, _ := client.ListProjects(nil, nil, &projectNamePrefix, nil, nil, nil)
+		for _, project := range resp.Projects {
+			_, _ = client.DeleteProject(project.ID)
+		}
+	})
+
+	var (
+		wantWeekdays  = []int{1, 2}
+		wantStartTime = "21:00"
+		wantEndTime   = "23:00"
+	)
+
+	var weekdaysStr string
+	for i, day := range wantWeekdays {
+		weekdaysStr = weekdaysStr + strconv.Itoa(day)
+		if i < len(wantWeekdays)-1 {
+			weekdaysStr += ","
+		}
+	}
+
+	projectName := newProjectName(projectNamePrefix)
+	resource.Test(
+		t, resource.TestCase{
+			ProviderFactories: map[string]func() (*schema.Provider, error){
+				"neon": func() (*schema.Provider, error) {
+					return newAccTest(), nil
+				},
+			},
+			Steps: []resource.TestStep{
+				{
+					ResourceName: "neon_project.this",
+					Config: fmt.Sprintf(`resource "neon_project" "this" { 
+	name = "%s"
+	maintenance_window {
+		weekdays   = [%s]
+	    start_time = "%s"
+	    end_time   = "%s"
+	}
+}`, projectName, weekdaysStr, wantStartTime, wantEndTime),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.#", "1",
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.start_time", wantStartTime,
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.end_time", wantEndTime,
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.weekdays.#",
+							strconv.Itoa(len(wantWeekdays)),
+						),
+
+						func(state *terraform.State) error {
+							ref, err := readProjectInfo(client, projectName)
+							if err != nil {
+								return err
+							}
+
+							if !assert.ElementsMatch(t, ref.Settings.MaintenanceWindow.Weekdays, wantWeekdays) {
+								return fmt.Errorf("the set maintenance weekdays got: %v, want: %v",
+									ref.Settings.MaintenanceWindow.Weekdays, wantWeekdays)
+							}
+
+							if ref.Settings.MaintenanceWindow.StartTime != wantStartTime {
+								return fmt.Errorf("the set maintenance weekdays")
+							}
+
+							return nil
+						},
+					),
+				},
+				{
+					ResourceName: "neon_project.this",
+					Config:       fmt.Sprintf(`resource "neon_project" "this" {name = %s}`, projectName),
+					ImportState:  true,
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.#", "1",
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.start_time", wantStartTime,
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.end_time", wantEndTime,
+						),
+						resource.TestCheckResourceAttr(
+							"neon_project.this", "maintenance_window.0.weekdays.#",
+							strconv.Itoa(len(wantWeekdays)),
+						),
+					),
+				},
+				{
+					ResourceName: "neon_project.this",
+					Config: fmt.Sprintf(`resource "neon_project" "this" { 
+	name = "%s"
+	maintenance_window {
+		weekdays   = [%s]
+	    start_time = "%s"
+	    end_time   = "%s"
+	}
+}`, projectName, weekdaysStr, wantStartTime, wantEndTime),
+					PlanOnly: true,
+				},
+				{
+					ResourceName: "neon_project.this",
+					Config:       fmt.Sprintf(`resource "neon_project" "this" {name = %s}`, projectName),
+					ImportState:  true,
+					PlanOnly:     true,
+				},
+			},
+		},
+	)
 }
 
 func TestLogicalReplication(t *testing.T) {

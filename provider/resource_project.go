@@ -2,33 +2,501 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int32planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	neon "github.com/kislerdm/neon-sdk-go"
+	"github.com/neondatabase/terraform-provider-neon/provider/types"
 )
 
-var _ resource.ResourceWithConfigure = (*neonProjectResource)(nil)
-var _ resource.ResourceWithImportState = (*neonProjectResource)(nil)
+const providerDefaultHistoryRetentionSeconds = int(time.Hour/time.Second) * 24
 
-func NewNeonProjectResource() resource.Resource {
-	return &neonProjectResource{}
+func newStoreProjectPasswordDefault() *schema.Schema {
+	o := types.NewOptionalTristateBool(`Whether or not passwords are stored for roles in the Neon project.
+Storing passwords facilitates access to Neon features that require authorization.`, false)
+	o.Default = types.ValTrue
+	return o
+}
+
+var schemaCompute = &schema.Schema{
+	Type:        schema.TypeList,
+	MaxItems:    1,
+	Computed:    true,
+	Optional:    true,
+	Description: `Primary read-write compute resource provisioned with the project.`,
+	Elem: &schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Endpoint ID.",
+			},
+			"autoscaling_limit_min_cu": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Computed:    true,
+				Description: `Minimal value of the autoscaling limit for the primary project compute.`,
+			},
+			"autoscaling_limit_max_cu": {
+				Type:        schema.TypeFloat,
+				Optional:    true,
+				Computed:    true,
+				Description: `Maximal value of the autoscaling limit for the primary project compute.`,
+			},
+			"suspend_timeout_seconds": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Computed: true,
+				ValidateFunc: func(v interface{}, s string) (warn []string, errs []error) {
+					switch vv, ok := v.(int); ok {
+					case vv == -1:
+					default:
+						warn, errs = intValidationNotNegative(v, s)
+					}
+					return warn, errs
+				},
+				Description: `Duration of inactivity in seconds after which the default compute endpoint is automatically suspended.
+The value 0 means use the global default.
+The value -1 means never suspend. The default value is 300 seconds (5 minutes).
+The maximum value is 604800 seconds (1 week)`,
+			},
+			"name": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Compute name.",
+			},
+		},
+	},
+}
+
+func resourceProject() *schema.Resource {
+	maintenanceWindowSettings := &schema.Schema{
+		Type:     schema.TypeList,
+		MaxItems: 1,
+		Computed: true,
+		Optional: true,
+		Description: "A time period during which Neon may perform maintenance on the project's infrastructure. " +
+			"During this time, the project's compute endpoints may be unavailable and existing " +
+			"connections can be interrupted.",
+		Elem: &schema.Resource{
+			Schema: map[string]*schema.Schema{
+				"weekdays": {
+					Type:     schema.TypeList,
+					Required: true,
+					MinItems: 1,
+					MaxItems: 7,
+					Description: "A list of weekdays when the maintenance window is active. " +
+						"Encoded as ints, where 1 - Monday, and 7 - Sunday.",
+					Elem: &schema.Schema{
+						Type: schema.TypeInt,
+					},
+				},
+				"start_time": {
+					Type:        schema.TypeString,
+					Required:    true,
+					Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+				},
+				"end_time": {
+					Type:        schema.TypeString,
+					Required:    true,
+					Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
+				},
+			},
+		},
+	}
+	return &schema.Resource{
+		Description: `Neon Project.
+
+Note that this resource manages five resources:
+
+- Project: https://neon.com/docs/reference/glossary#project
+- Root branch: https://neon.com/docs/reference/glossary#root-branch
+- Primary compute with the default read-write endpoint: https://neon.com/docs/reference/glossary#compute
+- Default database: https://neon.com/docs/reference/glossary#database
+- Default role: https://neon.com/docs/reference/glossary#postgres-role
+`,
+		SchemaVersion: 11,
+		Importer: &schema.ResourceImporter{
+			StateContext: resourceProjectImport,
+		},
+		CreateContext: resourceProjectCreateRetry,
+		ReadContext:   resourceProjectReadRetry,
+		UpdateContext: resourceProjectUpdateRetry,
+		DeleteContext: resourceProjectDeleteRetry,
+		Schema: map[string]*schema.Schema{
+			"id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Project ID.",
+			},
+			"org_id": {
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					var f = true
+					switch {
+					case new == old:
+					case new == "" && old == d.Get(k).(string):
+					default:
+						f = false
+					}
+					return f
+				},
+				Description: "Identifier of the organisation to which this project belongs.",
+			},
+			"name": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Project name.",
+			},
+			"region_id": schemaRegionID,
+			"pg_version": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "Postgres version",
+			},
+			"store_password": newStoreProjectPasswordDefault(),
+			"history_retention_seconds": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      providerDefaultHistoryRetentionSeconds,
+				ValidateFunc: intValidationNotNegative,
+				Description: `The number of seconds to retain the point-in-time restore (PITR) backup history for this project.
+Default: 1 day, see https://neon.tech/docs/reference/glossary#point-in-time-restore.`,
+			},
+			"compute_provisioner": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				Description: `Provisioner The Neon compute provisioner.
+Specify the k8s-neonvm provisioner to create a compute endpoint that supports Autoscaling.
+`,
+				ValidateFunc: func(i interface{}, s string) (warns []string, errs []error) {
+					switch v := i.(string); v {
+					case "k8s-pod", "k8s-neonvm":
+					default:
+						errs = append(
+							errs,
+							errors.New(
+								v+" is not supported for "+s+
+									". See details: https://api-docs.neon.tech/reference/createproject",
+							),
+						)
+					}
+					return
+				},
+			},
+			"quota":  schemaQuota,
+			"branch": schemaDefaultBranch,
+			"allowed_ips": {
+				Type:     schema.TypeList,
+				MinItems: 1,
+				Optional: true,
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Description: `A list of IP addresses that are allowed to connect to the endpoints.
+Note that the feature is available to the Neon Scale plans only. Details: https://neon.tech/docs/manage/projects#configure-ip-allow`,
+			},
+			"allowed_ips_protected_branches_only": types.NewOptionalTristateBool(
+				`Apply the allow-list to the protected branches only.
+Note that the feature is available to the Neon Scale plans only.`, false),
+			"block_public_connections": types.NewOptionalTristateBool(
+				`Block connections from public internet. This supersedes the AllowedIPs list.`,
+				false),
+			"block_vpc_connections": types.NewOptionalTristateBool(
+				`Block connections that use VPC endpoints.`, false),
+			"enable_logical_replication": types.NewOptionalTristateBool(
+				`Sets wal_level=logical for all compute endpoints in this project.
+All active endpoints will be suspended. See details: https://neon.tech/docs/introduction/logical-replication
+**Note**: removal of this config from the manifest will correspond to the API call with the respective setting set to false. 
+
+**Warning**: Once enabled, logical replication cannot be disabled.`, false),
+			// computed fields
+			"default_branch_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default branch ID.",
+			},
+			"database_host": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default database host.",
+			},
+			"database_host_pooler": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default endpoint host via pooler.",
+			},
+			"database_name": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default database name.",
+			},
+			"database_user": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default database role.",
+			},
+			"database_password": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Sensitive:   true,
+				Description: "Default database access password.",
+			},
+			"connection_uri": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Sensitive:   true,
+				Description: "Default connection uri. **Note** that it contains access credentials.",
+			},
+			"connection_uri_pooler": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Sensitive:   true,
+				Description: "Default connection uri with the traffic via pooler. **Note** that it contains access credentials.",
+			},
+			"default_endpoint_id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Default endpoint ID.",
+			},
+			"maintenance_window": maintenanceWindowSettings,
+			"hipaa": types.NewOptionalTristateBool(`Enable HIPAA compliance for the project. 
+Note that HIPAA must be configured for the organization first.
+
+**Warning**: Once enabled, HIPAA cannot be disabled.`, false),
+			"default_branch_protected": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "Set default branch as protected. **Note** that the default value is false.",
+			},
+			"primary_compute": schemaCompute,
+
+			// project-wide config for the compute resources
+			"autoscaling_limit_min_cu": {
+				Type:     schema.TypeFloat,
+				Optional: true,
+				Computed: true,
+				Description: `Minimal value of the project-wide autoscaling limit. 
+Note that it is not retrospectively applicable, i.e., existing compute resources are not affected by this configuration.`,
+			},
+			"autoscaling_limit_max_cu": {
+				Type:     schema.TypeFloat,
+				Optional: true,
+				Computed: true,
+				Description: `Maximal value of the project-wide autoscaling limit. 
+Note that it is not retrospectively applicable, i.e., existing compute resources are not affected by this configuration.`,
+			},
+			"suspend_timeout_seconds": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Computed: true,
+				ValidateFunc: func(v interface{}, s string) (warn []string, errs []error) {
+					switch vv, ok := v.(int); ok {
+					case vv == -1:
+					default:
+						warn, errs = intValidationNotNegative(v, s)
+					}
+					return warn, errs
+				},
+				Description: `Duration of inactivity in seconds after which the compute endpoint is automatically suspended.
+The value 0 means use the global default.
+The value -1 means never suspend. The default value is 300 seconds (5 minutes).
+The maximum value is 604800 seconds (1 week)`,
+			},
+		},
+	}
+}
+
+var schemaQuota = &schema.Schema{
+	Type:     schema.TypeList,
+	MaxItems: 1,
+	Optional: true,
+	Computed: true,
+	Description: `Per-project consumption quota. If the quota is exceeded, all active computes
+are automatically suspended and it will not be possible to start them with
+an API method call or incoming proxy connections. The only exception is
+logical_size_bytes, which is applied on per-branch basis, i.e., only the
+compute on the branch that exceeds the logical_size quota will be suspended.
+
+Quotas are enforced based on per-project consumption metrics with the same names,
+which are reset at the end of each billing period (the first day of the month).
+Logical size is also an exception in this case, as it represents the total size
+of data stored in a branch, so it is not reset.
+
+The zero value per attributed means 'unlimited'.`,
+	Elem: &schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"active_time_seconds": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: intValidationNotNegative,
+				Description:  `The total amount of wall-clock time allowed to be spent by the project's compute endpoints.`,
+			},
+			"compute_time_seconds": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: intValidationNotNegative,
+				Description:  `The total amount of CPU seconds allowed to be spent by the project's compute endpoints.`,
+			},
+			"written_data_bytes": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: intValidationNotNegative,
+				Description:  `Total amount of data written to all of a project's branches.`,
+			},
+			"data_transfer_bytes": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: intValidationNotNegative,
+				Description:  `Total amount of data transferred from all of a project's branches using the proxy.`,
+			},
+			"logical_size_bytes": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Computed:     true,
+				ValidateFunc: intValidationNotNegative,
+				Description:  `Limit on the logical size of every project's branch.`,
+			},
+		},
+	},
+}
+
+func mapToQuotaSettings(v map[string]interface{}) (o *neon.ProjectQuota) {
+	o = &neon.ProjectQuota{}
+	if v, ok := v["active_time_seconds"].(int); ok && v > 0 {
+		o.ActiveTimeSeconds = pointer(int64(v))
+	}
+
+	if v, ok := v["compute_time_seconds"].(int); ok && v > 0 {
+		o.ComputeTimeSeconds = pointer(int64(v))
+	}
+
+	if v, ok := v["written_data_bytes"].(int); ok && v > 0 {
+		o.WrittenDataBytes = pointer(int64(v))
+	}
+
+	if v, ok := v["data_transfer_bytes"].(int); ok && v > 0 {
+		o.DataTransferBytes = pointer(int64(v))
+	}
+
+	if v, ok := v["logical_size_bytes"].(int); ok && v > 0 {
+		o.LogicalSizeBytes = pointer(int64(v))
+	}
+	return o
+}
+
+var schemaDefaultBranch = &schema.Schema{
+	Type:     schema.TypeList,
+	MaxItems: 1,
+	Optional: true,
+	Computed: true,
+	ForceNew: true,
+	Elem: &schema.Resource{
+		Schema: map[string]*schema.Schema{
+			"id": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Branch ID.",
+			},
+			"name": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+				Description: `The name of the default branch provisioned upon creation of new project.
+If not specified, the default branch name will be used.`,
+			},
+			"role_name": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+				Description: `The name of the default role provisioned upon creation of new project.
+If not specified, the default role name will be used.`,
+			},
+			"database_name": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+				ForceNew: true,
+				Description: `The name of the default database provisioned upon creation of new project. It's owned by the default role (` + "`role_name`" + `).
+If not specified, the default database name will be used.`,
+			},
+		},
+	},
+}
+
+func mapToBranchSettings(v map[string]interface{}) *neon.ProjectCreateRequestProjectBranch {
+	o := &neon.ProjectCreateRequestProjectBranch{}
+
+	if v, ok := v["name"].(string); ok && v != "" {
+		o.Name = pointer(v)
+	}
+
+	if v, ok := v["database_name"].(string); ok && v != "" {
+		o.DatabaseName = pointer(v)
+	}
+
+	if v, ok := v["role_name"].(string); ok && v != "" {
+		o.RoleName = pointer(v)
+	}
+
+	return o
+}
+
+func newDbConnectionInfo(
+	c sdkProject,
+	projectID string,
+	branchID string,
+	endpoints []neon.Endpoint,
+	databases []neon.Database,
+) (dbConnectionInfo, error) {
+	defaultEndpoint := findDefaultEndpoint(endpoints, branchID)
+
+	defaultDB := findDefaultDatabase(databases, branchID)
+
+	resp, err := c.GetProjectBranchRolePassword(projectID, branchID, defaultDB.OwnerName)
+	if err != nil {
+		return dbConnectionInfo{}, err
+	}
+	defaultRolePass := resp.Password
+
+	return dbConnectionInfo{
+		userName:        defaultDB.OwnerName,
+		pass:            defaultRolePass,
+		dbName:          defaultDB.Name,
+		host:            defaultEndpoint.Host,
+		poolerHost:      newPooledHost(defaultEndpoint.Host),
+		endpointID:      defaultEndpoint.ID,
+		defaultEndpoint: defaultEndpoint,
+	}, nil
+}
+
+func newPooledHost(host string) string {
+	const poolerSuffix = "-pooler"
+	els := strings.SplitN(host, ".", 2)
+	var o string
+	if len(els) == 2 {
+		o = fmt.Sprintf("%s.%s", els[0]+poolerSuffix, els[1])
+	}
+	return o
 }
 
 func findDefaultDatabase(databases []neon.Database, defaultBranchID string) neon.Database {
@@ -78,981 +546,698 @@ func findDefaultEndpoint(endpoints []neon.Endpoint, defaultBranchID string) neon
 	return o
 }
 
-type neonProjectResourceModel struct {
-	ID       types.String `tfsdk:"id"`
-	OrgID    types.String `tfsdk:"org_id"`
-	Name     types.String `tfsdk:"name"`
-	RegionID types.String `tfsdk:"region_id"`
-
-	PgVersion types.Int32 `tfsdk:"pg_version"`
-
-	StorePassword types.Bool `tfsdk:"store_password"`
-
-	AllowedIPs                      types.List `tfsdk:"allowed_ips"`
-	AllowedIPsProtectedBranchesOnly types.Bool `tfsdk:"allowed_ips_protected_branches_only"`
-
-	ComputeProvisioner    types.String  `tfsdk:"compute_provisioner"`
-	AutoscalingLimitMaxCU types.Float64 `tfsdk:"autoscaling_limit_max_cu"`
-	AutoscalingLimitMinCU types.Float64 `tfsdk:"autoscaling_limit_min_cu"`
-	SuspendTimeoutSeconds types.Int64   `tfsdk:"suspend_timeout_seconds"`
-
-	HistoryRetentionSeconds  types.Int32 `tfsdk:"history_retention_seconds"`
-	EnableLogicalReplication types.Bool  `tfsdk:"enable_logical_replication"`
-
-	BlockPublicConnections types.Bool `tfsdk:"block_public_connections"`
-	BlockVPCConnections    types.Bool `tfsdk:"block_vpc_connections"`
-
-	DatabaseName types.String `tfsdk:"database_name"`
-	DatabaseUser types.String `tfsdk:"database_user"`
-
-	EnabledLibraries            types.List `tfsdk:"enabled_libraries"`
-	EnabledLibrariesUseDefaults types.Bool `tfsdk:"enabled_libraries_use_defaults"`
-
-	Hipaa types.Bool `tfsdk:"hipaa"`
-
-	MaintenanceWindow *maintenanceWindow         `tfsdk:"maintenance_window"`
-	Quota             *projectQuota              `tfsdk:"quota"`
-	Branch            *neonBranchResourceModel   `tfsdk:"branch"`
-	PrimaryCompute    *neonEndpointResourceModel `tfsdk:"primary_compute"`
-
-	// 	TODO: add pgSettings (?) verify for bug in API behaviour
-	// 	TODO: add autit level
-
-	// TODO: delete after the off. release: it's here for BW compatibility only
-	DefaultBranchID types.String `tfsdk:"default_branch_id"`
-	// TODO: delete after the off. release: it's here for BW compatibility only
-	DefaultBranchProtected types.Bool `tfsdk:"default_branch_protected"`
-	// TODO: delete after the off. release: it's here for BW compatibility only
-	DefaultEndpointID types.String `tfsdk:"default_endpoint_id"`
-	// TODO: delete after the off. release: it's here for BW compatibility only
-	DatabaseHost types.String `tfsdk:"database_host"`
-	// TODO: delete after the off. release: it's here for BW compatibility only
-	DatabaseHostPooler types.String `tfsdk:"database_host_pooler"`
+type dbConnectionInfo struct {
+	userName        string
+	pass            string
+	dbName          string
+	host            string
+	endpointID      string
+	poolerHost      string
+	defaultEndpoint neon.Endpoint
 }
 
-func (v neonProjectResourceModel) maintenanceWindow(ctx context.Context, diagnostics *diag.Diagnostics) *neon.MaintenanceWindow {
-	if v.MaintenanceWindow == nil {
-		return nil
-	}
-	var tmp []int32
-	diagnostics.Append(v.MaintenanceWindow.Weekdays.ElementsAs(ctx, &tmp, false)...)
-	if diagnostics.HasError() {
-		return nil
-	}
+const sslMode = "?sslmode=require"
 
-	o := &neon.MaintenanceWindow{
-		StartTime: v.MaintenanceWindow.StartTime.ValueString(),
-		EndTime:   v.MaintenanceWindow.EndTime.ValueString(),
-		Weekdays:  make([]int, 0, len(tmp)),
+func (i dbConnectionInfo) connectionURI() string {
+	if i.userName == "" || i.host == "" || i.dbName == "" || i.pass == "" {
+		return ""
 	}
-	for _, el := range tmp {
-		o.Weekdays = append(o.Weekdays, int(el))
-	}
-	return o
+	return "postgres://" + i.userName + ":" + i.pass + "@" + i.host + "/" + i.dbName + sslMode
 }
 
-func (v *neonProjectResourceModel) inferAttr(ctx context.Context, project neon.Project, branch neon.Branch,
-	endpoint neon.Endpoint, database neon.Database, diagnostics *diag.Diagnostics) {
-	v.ID = types.StringValue(project.ID)
-	v.Name = types.StringValue(project.Name)
-	v.OrgID = types.StringPointerValue(project.OrgID)
-	v.RegionID = types.StringValue(project.RegionID)
-	v.ComputeProvisioner = types.StringValue(string(project.Provisioner))
-	v.PgVersion = types.Int32Value(int32(project.PgVersion))
-	v.StorePassword = types.BoolValue(project.StorePasswords)
-	v.HistoryRetentionSeconds = types.Int32Value(project.HistoryRetentionSeconds)
-
-	v.EnableLogicalReplication = types.BoolNull()
-	v.BlockPublicConnections = types.BoolNull()
-	v.BlockVPCConnections = types.BoolNull()
-	v.EnableLogicalReplication = types.BoolNull()
-	v.Hipaa = types.BoolNull()
-
-	v.AllowedIPsProtectedBranchesOnly = types.BoolNull()
-	v.AllowedIPs = types.ListNull(types.StringType)
-
-	v.EnabledLibraries = types.ListNull(types.StringType)
-	v.EnabledLibrariesUseDefaults = types.BoolNull()
-
-	initializeProjectBlocks(v)
-
-	if project.Settings != nil {
-		settings := project.Settings
-
-		v.Hipaa = types.BoolPointerValue(settings.Hipaa)
-		v.EnableLogicalReplication = types.BoolPointerValue(settings.EnableLogicalReplication)
-		v.BlockPublicConnections = types.BoolPointerValue(settings.BlockPublicConnections)
-		v.BlockVPCConnections = types.BoolPointerValue(settings.BlockVpcConnections)
-		v.EnableLogicalReplication = types.BoolPointerValue(settings.EnableLogicalReplication)
-
-		var d diag.Diagnostics
-		if settings.AllowedIps != nil {
-			v.AllowedIPsProtectedBranchesOnly = types.BoolPointerValue(settings.AllowedIps.ProtectedBranchesOnly)
-			if len(settings.AllowedIps.Ips) > 0 {
-				v.AllowedIPs, d = types.ListValueFrom(ctx, types.StringType, settings.AllowedIps.Ips)
-				diagnostics.Append(d...)
-			}
-		}
-
-		if v.Quota != nil && settings.Quota != nil {
-			v.Quota = &projectQuota{
-				ActiveTimeSeconds:  types.Int64PointerValue(settings.Quota.ActiveTimeSeconds),
-				ComputeTimeSeconds: types.Int64PointerValue(settings.Quota.ComputeTimeSeconds),
-				DataTransferBytes:  types.Int64PointerValue(settings.Quota.DataTransferBytes),
-				LogicalSizeBytes:   types.Int64PointerValue(settings.Quota.LogicalSizeBytes),
-				WrittenDataBytes:   types.Int64PointerValue(settings.Quota.WrittenDataBytes),
-			}
-		}
-
-		if settings.PreloadLibraries != nil {
-			v.EnabledLibrariesUseDefaults = types.BoolPointerValue(settings.PreloadLibraries.UseDefaults)
-			if len(settings.PreloadLibraries.EnabledLibraries) > 0 {
-				v.EnabledLibraries, d = types.ListValueFrom(ctx, types.StringType, settings.PreloadLibraries.EnabledLibraries)
-				diagnostics.Append(d...)
-			}
-		}
-
-		if v.MaintenanceWindow != nil {
-			v.MaintenanceWindow = &maintenanceWindow{
-				StartTime: types.StringValue(settings.MaintenanceWindow.StartTime),
-				EndTime:   types.StringValue(settings.MaintenanceWindow.EndTime),
-			}
-			weekdays := make([]int32, len(settings.MaintenanceWindow.Weekdays))
-			for i, weekday := range settings.MaintenanceWindow.Weekdays {
-				weekdays[i] = int32(weekday)
-			}
-			v.MaintenanceWindow.Weekdays, d = types.ListValueFrom(ctx, types.Int32Type, weekdays)
-			diagnostics.Append(d...)
-		}
+func (i dbConnectionInfo) poolerConnectionURI() string {
+	if i.userName == "" || i.poolerHost == "" || i.dbName == "" || i.pass == "" {
+		return ""
 	}
-
-	// default compute a/k/a endpoints settings
-	v.AutoscalingLimitMinCU = types.Float64Null()
-	v.AutoscalingLimitMaxCU = types.Float64Null()
-	v.SuspendTimeoutSeconds = types.Int64Null()
-	if project.DefaultEndpointSettings != nil {
-		settings := project.DefaultEndpointSettings
-		if settings.AutoscalingLimitMaxCu != nil {
-			v.AutoscalingLimitMaxCU = types.Float64Value(float64(*settings.AutoscalingLimitMaxCu))
-		}
-		if settings.AutoscalingLimitMinCu != nil {
-			v.AutoscalingLimitMinCU = types.Float64Value(float64(*settings.AutoscalingLimitMinCu))
-		}
-		if settings.SuspendTimeoutSeconds != nil {
-			v.SuspendTimeoutSeconds = types.Int64Value(int64(*settings.SuspendTimeoutSeconds))
-		}
-	}
-
-	v.Branch = &neonBranchResourceModel{}
-	v.Branch.inferAttr(branch)
-	v.DefaultBranchID = v.Branch.ID
-	v.DefaultBranchProtected = v.Branch.Protected
-
-	v.PrimaryCompute = &neonEndpointResourceModel{}
-	v.PrimaryCompute.inferAttr(ctx, endpoint, diagnostics)
-	v.DefaultEndpointID = v.PrimaryCompute.ID
-	v.DatabaseHost = v.PrimaryCompute.Host
-	v.DatabaseHostPooler = v.PrimaryCompute.HostPooler
-
-	v.DatabaseName = types.StringValue(database.Name)
-	v.DatabaseUser = types.StringValue(database.OwnerName)
+	return "postgres://" + i.userName + ":" + i.pass + "@" + i.poolerHost + "/" + i.dbName + sslMode
 }
 
-func initializeProjectBlocks(state *neonProjectResourceModel) {
-	if state.MaintenanceWindow == nil {
-		state.MaintenanceWindow = &maintenanceWindow{
-			Weekdays: types.ListNull(types.Int32Type),
-		}
-	}
-	if state.Quota == nil {
-		state.Quota = &projectQuota{}
-	}
-	if state.Branch == nil {
-		state.Branch = &neonBranchResourceModel{}
-	}
-	if state.PrimaryCompute == nil {
-		state.PrimaryCompute = &neonEndpointResourceModel{
-			EnabledLibraries: types.ListNull(types.StringType),
-		}
-	}
-}
-
-type maintenanceWindow struct {
-	Weekdays  types.List   `tfsdk:"weekdays"`
-	StartTime types.String `tfsdk:"start_time"`
-	EndTime   types.String `tfsdk:"end_time"`
-}
-
-type validatorMaintenanceWindow struct{}
-
-func (v *validatorMaintenanceWindow) Description(_ context.Context) string {
-	return "Maintenance window's validator."
-}
-
-func (v *validatorMaintenanceWindow) MarkdownDescription(ctx context.Context) string {
-	return v.Description(ctx)
-}
-
-func (v *validatorMaintenanceWindow) ValidateObject(ctx context.Context, req validator.ObjectRequest,
-	resp *validator.ObjectResponse) {
-	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
-		return
-	}
-
-	var window maintenanceWindow
-	resp.Diagnostics.Append(req.ConfigValue.As(ctx, &window, basetypes.ObjectAsOptions{})...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	var isValidTime = func(s string) bool {
-		_, err := time.Parse("15:04", s)
-		return err == nil
-	}
-	errMsg := "undefined maintenance window"
-	if window.Weekdays.IsNull() || window.Weekdays.IsUnknown() {
-		resp.Diagnostics.AddError(errMsg, "undefined weekdays, it must be a list of values between 1 and 7")
-	}
-	var weekdays []int32
-	resp.Diagnostics.Append(window.Weekdays.ElementsAs(ctx, &weekdays, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	switch {
-	case len(weekdays) > 7 || len(weekdays) < 1:
-		resp.Diagnostics.AddError(errMsg, "invalid number of weekdays, it must be between 1 and 7")
-	default:
-		for j, weekday := range weekdays {
-			switch weekday {
-			case 1, 2, 3, 4, 5, 6, 7:
-			default:
-				resp.Diagnostics.AddError(errMsg,
-					fmt.Sprintf("invalid weekday %d, the value must be from 1 (Mon.) to 7 (Sun.)", j))
-			}
-		}
-	}
-	if window.StartTime.IsUnknown() || window.StartTime.IsNull() {
-		resp.Diagnostics.AddError(errMsg, "start_time is required")
-	}
-	if window.EndTime.IsUnknown() || window.EndTime.IsNull() {
-		resp.Diagnostics.AddError(errMsg, "end_time is required")
-	}
-
-	if !isValidTime(window.StartTime.ValueString()) {
-		resp.Diagnostics.AddError(errMsg, "invalid start_time, it must be in the format of \"HH:MM\"")
-	}
-	if !isValidTime(window.EndTime.ValueString()) {
-		resp.Diagnostics.AddError(errMsg, "invalid end_time, it must be in the format of \"HH:MM\"")
-	}
-}
-
-type projectQuota struct {
-	ActiveTimeSeconds  types.Int64 `tfsdk:"active_time_seconds"`
-	ComputeTimeSeconds types.Int64 `tfsdk:"compute_time_seconds"`
-	WrittenDataBytes   types.Int64 `tfsdk:"written_data_bytes"`
-	DataTransferBytes  types.Int64 `tfsdk:"data_transfer_bytes"`
-	LogicalSizeBytes   types.Int64 `tfsdk:"logical_size_bytes"`
-}
-
-type neonProjectResource struct {
-	client          *neon.Client
-	endpointHandler *neonEndpointResource
-	branchHandler   *neonBranchResource
-}
-
-func (r neonProjectResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = "neon_project"
-}
-
-func (r *neonProjectResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-
-	client, ok := req.ProviderData.(*providerAdapter)
-	if !ok {
-		resp.Diagnostics.AddError("Unexpected Resource Configure Type", "Expected *providerAdapter, got an unexpected type.")
-		return
-	}
-	if client.sdk == nil {
-		resp.Diagnostics.AddError("SDK is not configured", "")
-		return
-	}
-	r.client = client.sdk
-
-	r.endpointHandler = &neonEndpointResource{}
-	r.endpointHandler.Configure(ctx, req, resp)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	r.branchHandler = &neonBranchResource{}
-	r.branchHandler.Configure(ctx, req, resp)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-}
-
-func (r neonProjectResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	attrs := map[string]schema.Attribute{
-		"id": schema.StringAttribute{
-			Description: "Project ID.",
-			Computed:    true,
-		},
-		"org_id": schema.StringAttribute{
-			Description:   "Identifier of the organisation to which this project belongs.",
-			Computed:      true,
-			Optional:      true,
-			PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-		},
-		"name": schema.StringAttribute{
-			Description: "Project name.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"region_id": schema.StringAttribute{
-			Description:   "Deployment region: https://neon.com/docs/introduction/regions",
-			Optional:      true,
-			Computed:      true,
-			PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-		},
-		"pg_version": schema.Int32Attribute{
-			Description:   "Postgres version",
-			Optional:      true,
-			Computed:      true,
-			PlanModifiers: []planmodifier.Int32{int32planmodifier.RequiresReplace()},
-			// 	TODO: add validator
-		},
-		"store_password": schema.BoolAttribute{
-			Description: "Whether or not passwords are stored for roles in the Neon project.\nStoring passwords facilitates access to Neon features that require authorization.",
-			Optional:    true,
-			Computed:    true,
-			Default:     booldefault.StaticBool(true),
-		},
-		"history_retention_seconds": schema.Int32Attribute{
-			Description: "The number of seconds to retain the point-in-time restore (PITR) backup history for this project.\nDefault: 1 day, see https://neon.com/docs/reference/glossary#point-in-time-restore.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"allowed_ips": schema.ListAttribute{
-			Description: "A list of IP addresses that are allowed to connect to the endpoints.\nNote that the feature is available to the Neon Scale plans only. Details: https://neon.com/docs/manage/projects#configure-ip-allow",
-			Optional:    true,
-			ElementType: types.StringType,
-		},
-		"allowed_ips_protected_branches_only": schema.BoolAttribute{
-			Description: "Apply the allow-list to the protected branches only.\nNote that the feature is available to the Neon Scale plans only.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"block_public_connections": schema.BoolAttribute{
-			Description: "Block connections from public internet. This supersedes the AllowedIPs list.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"block_vpc_connections": schema.BoolAttribute{
-			Description: "Block connections that use VPC endpoints.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"enable_logical_replication": schema.BoolAttribute{
-			Description: "Sets wal_level=logical for all compute endpoints in this project.\nAll active endpoints will be suspended. See details: https://neon.com/docs/introduction/logical-replication\n**Note**: removal of this config from the manifest will correspond to the API call with the respective setting set to false.\n\n**Warning**: Once enabled, logical replication cannot be disabled.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"database_name": schema.StringAttribute{
-			Description: "Default database name.",
-			Computed:    true,
-		},
-		"database_user": schema.StringAttribute{
-			Description: "Default database role.",
-			Computed:    true,
-		},
-		"autoscaling_limit_min_cu": schema.Float64Attribute{
-			Description: "Minimal value of the project-wide autoscaling limit.\nNote that it is not retrospectively applicable, i.e., existing compute resources are not affected by this configuration.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"autoscaling_limit_max_cu": schema.Float64Attribute{
-			Description: "Maximal value of the project-wide autoscaling limit.\nNote that it is not retrospectively applicable, i.e., existing compute resources are not affected by this configuration.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"suspend_timeout_seconds": schema.Int64Attribute{
-			Description: "Project-wide scale-to-zero idle timeout, in seconds, before the compute suspends." +
-				"\nNote that it is not retrospectively applicable, i.e., existing compute resources are not affected by this configuration.\n" +
-				"   - `0` means the plan default (`300` sec.) applies;\n" +
-				"   - `-1` means scale-to-zero is disabled (never suspends), can be set only on paid plans;\n" +
-				"   - `604800` sec. (1 week) is the maximum.\n" +
-				"   - `60` sec. (1 minute) is the minimum.\n" +
-				"See details [here](https://neon.com/docs/manage/endpoints#scale-to-zero-configuration).",
-			Optional:   true,
-			Computed:   true,
-			Validators: []validator.Int64{validateSuspendTimeout},
-		},
-		"compute_provisioner": schema.StringAttribute{
-			Description: "Project-wide compute provisioner. `k8s-neonvm` (default) supports Autoscaling; `k8s-pod` is fixed-size compute. Also `docker` and `serverless-platform`.",
-			Optional:    true,
-			Computed:    true,
-			Default:     stringdefault.StaticString("k8s-neonvm"),
-			Validators:  []validator.String{validateComputeProvisioner},
-		},
-		"hipaa": schema.BoolAttribute{
-			Description:   "Enable HIPAA compliance for the project.\nNote that HIPAA must be configured for the organization first.\n\n**Warning**: Once enabled, HIPAA cannot be disabled.",
-			Computed:      true,
-			Optional:      true,
-			PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
-		},
-		"enabled_libraries": schema.ListAttribute{
-			Description: "Names of shared libraries preload by default when provisioning compute resources, i.e., endpoints.",
-			Optional:    true,
-			Computed:    true,
-			ElementType: types.StringType,
-		},
-		"enabled_libraries_use_defaults": schema.BoolAttribute{
-			Description: "When true, the project's preload libraries include the platform default set in addition to any libraries listed in `enabled_libraries`.",
-			Optional:    true,
-			Computed:    true,
-		},
-		"default_branch_id": schema.StringAttribute{
-			Description:        "Default branch ID.",
-			DeprecationMessage: "Use the `id` attribute in the block `branch` instead.",
-			Computed:           true,
-		},
-		"default_branch_protected": schema.BoolAttribute{
-			Description:        "Set default branch as protected. **Note** that the default value is false.",
-			DeprecationMessage: "Use the `protected` attribute in the block `branch` instead.",
-			Optional:           true,
-			Computed:           true,
-			Default:            booldefault.StaticBool(false),
-		},
-		"default_endpoint_id": schema.StringAttribute{
-			Description:        "Default endpoint ID.",
-			DeprecationMessage: "Use the `id` attribute in the block `primary_compute` instead.",
-			Computed:           true,
-		},
-		"database_host": schema.StringAttribute{
-			Description:        "The hostname of the default compute endpoint.",
-			DeprecationMessage: "Use the `host` attribute in the block `primary_compute` instead.",
-			Computed:           true,
-		},
-		"database_host_pooler": schema.StringAttribute{
-			Description:        "The hostname of the default compute endpoint accessible through the connection pool (pgbouncer).",
-			DeprecationMessage: "Use the `host_pooler` attribute in the block `primary_compute` instead.",
-			Computed:           true,
-		},
-	}
-
-	endpointSchemaResp := resource.SchemaResponse{}
-	endpointResource := &neonEndpointResource{}
-	endpointResource.Schema(ctx, resource.SchemaRequest{}, &endpointSchemaResp)
-	projectEndpointSchemaAttributes := maps.Clone(endpointSchemaResp.Schema.Attributes)
-	for _, name := range []string{"project_id", "branch_id", "region_id", "type"} {
-		if _, ok := projectEndpointSchemaAttributes[name]; ok {
-			projectEndpointSchemaAttributes[name] =
-				newReadOnlyResourceAttrFromResourceAttr(projectEndpointSchemaAttributes[name])
-		}
-	}
-
-	branchSchemaResp := resource.SchemaResponse{}
-	branchResource := &neonBranchResource{}
-	branchResource.Schema(ctx, resource.SchemaRequest{}, &branchSchemaResp)
-	projectBranchSchemaAttributes := maps.Clone(branchSchemaResp.Schema.Attributes)
-	for _, name := range []string{"project_id"} {
-		if _, ok := projectBranchSchemaAttributes[name]; ok {
-			projectBranchSchemaAttributes[name] =
-				newReadOnlyResourceAttrFromResourceAttr(projectBranchSchemaAttributes[name])
-		}
-	}
-
-	blocks := map[string]schema.Attribute{
-		"branch": schema.SingleNestedAttribute{
-			Description: "Main branch provisioned with the project.",
-			Optional:    true,
-			Computed:    true,
-			Attributes:  projectBranchSchemaAttributes,
-		},
-		"primary_compute": schema.SingleNestedAttribute{
-			Description: "Primary read-write compute resource provisioned with the project.",
-			Optional:    true,
-			Computed:    true,
-			Attributes:  projectEndpointSchemaAttributes,
-		},
-		"quota": schema.SingleNestedAttribute{
-			Description: "Per-project consumption quota. If the quota is exceeded, all active computes\nare automatically suspended and it will not be possible to start them with\nan API method call or incoming proxy connections. The only exception is\nlogical_size_bytes, which is applied on per-branch basis, i.e., only the\ncompute on the branch that exceeds the logical_size quota will be suspended.\n\nQuotas are enforced based on per-project consumption metrics with the same names,\nwhich are reset at the end of each billing period (the first day of the month).\nLogical size is also an exception in this case, as it represents the total size\nof data stored in a branch, so it is not reset.\n\nThe zero value per attributed means 'unlimited'.",
-			Optional:    true,
-			Computed:    true,
-			Attributes: map[string]schema.Attribute{
-				"active_time_seconds": schema.Int64Attribute{
-					Description: "The total amount of wall-clock time allowed to be spent by the project's compute endpoints.",
-					Optional:    true,
-					Computed:    true,
-				},
-				"compute_time_seconds": schema.Int64Attribute{
-					Description: "The total amount of CPU seconds allowed to be spent by the project's compute endpoints.",
-					Optional:    true,
-					Computed:    true,
-				},
-				"written_data_bytes": schema.Int64Attribute{
-					Description: "Total amount of data written to all of a project's branches.",
-					Optional:    true,
-					Computed:    true,
-				},
-				"data_transfer_bytes": schema.Int64Attribute{
-					Description: "Total amount of data transferred from all of a project's branches using the proxy.",
-					Optional:    true,
-					Computed:    true,
-				},
-				"logical_size_bytes": schema.Int64Attribute{
-					Description: "Limit on the logical size of every project's branch.",
-					Optional:    true,
-					Computed:    true,
-				},
-			},
-		},
-		"maintenance_window": schema.SingleNestedAttribute{
-			Description: "A time period during which Neon may perform maintenance on the project's infrastructure. During this time, the project's compute endpoints may be unavailable and existing connections can be interrupted.",
-			Optional:    true,
-			Computed:    true,
-			Validators:  []validator.Object{&validatorMaintenanceWindow{}},
-			Attributes: map[string]schema.Attribute{
-				"weekdays": schema.ListAttribute{
-					Description: "A list of weekdays when the maintenance window is active. Encoded as ints, where 1 - Monday, and 7 - Sunday.",
-					ElementType: types.Int32Type,
-					Optional:    true,
-					Computed:    true,
-				},
-				"start_time": schema.StringAttribute{
-					Description: "Start time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-					Optional:    true,
-					Computed:    true,
-				},
-				"end_time": schema.StringAttribute{
-					Description: "End time of the maintenance window, in the format of \"HH:MM\". Uses UTC.",
-					Optional:    true,
-					Computed:    true,
-				},
-			},
-		},
-	}
-	maps.Copy(attrs, blocks)
-
-	resp.Schema = schema.Schema{
-		Description: `Neon Project.
-
-Note that this resource manages five resources:
-
-- Project: https://neon.com/docs/reference/glossary#project
-- Root branch: https://neon.com/docs/reference/glossary#root-branch
-- Primary compute with the default read-write endpoint: https://neon.com/docs/reference/glossary#compute
-- Default database: https://neon.com/docs/reference/glossary#database
-- Default role: https://neon.com/docs/reference/glossary#postgres-role
-`,
-		Attributes: attrs,
-	}
-}
-
-func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	if r.client == nil {
-		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
-		return
-	}
-
-	var state neonProjectResourceModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	var cfg neon.ProjectCreateRequest
-	if state.Name.ValueStringPointer() != nil && state.Name.ValueString() != "" {
-		cfg.Project.Name = state.Name.ValueStringPointer()
-	}
-	if !state.OrgID.IsNull() && !state.OrgID.IsUnknown() && state.OrgID.ValueString() != "" {
-		cfg.Project.OrgID = state.OrgID.ValueStringPointer()
-	}
-	if !state.RegionID.IsNull() && !state.RegionID.IsUnknown() && state.RegionID.ValueString() != "" {
-		cfg.Project.RegionID = state.RegionID.ValueStringPointer()
-	}
-	if !state.PgVersion.IsNull() && !state.PgVersion.IsUnknown() && state.PgVersion.ValueInt32() != 0 {
-		cfg.Project.PgVersion = pointer(neon.PgVersion(state.PgVersion.ValueInt32()))
-	}
-	if !state.StorePassword.IsNull() && !state.StorePassword.IsUnknown() {
-		cfg.Project.StorePasswords = state.StorePassword.ValueBoolPointer()
-	}
-	if !state.HistoryRetentionSeconds.IsNull() && !state.HistoryRetentionSeconds.IsUnknown() {
-		cfg.Project.HistoryRetentionSeconds = state.HistoryRetentionSeconds.ValueInt32Pointer()
-	}
-	if !state.ComputeProvisioner.IsNull() && !state.ComputeProvisioner.IsUnknown() {
-		cfg.Project.Provisioner = pointer(neon.Provisioner(state.ComputeProvisioner.ValueString()))
-	}
-
-	if !state.AutoscalingLimitMinCU.IsNull() && !state.AutoscalingLimitMinCU.IsUnknown() {
-		if cfg.Project.DefaultEndpointSettings == nil {
-			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
-		}
-		cfg.Project.DefaultEndpointSettings.AutoscalingLimitMinCu =
-			pointer(neon.ComputeUnit(state.AutoscalingLimitMinCU.ValueFloat64()))
-	}
-	if !state.AutoscalingLimitMaxCU.IsNull() && !state.AutoscalingLimitMaxCU.IsUnknown() {
-		if cfg.Project.DefaultEndpointSettings == nil {
-			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
-		}
-		cfg.Project.DefaultEndpointSettings.AutoscalingLimitMaxCu =
-			pointer(neon.ComputeUnit(state.AutoscalingLimitMaxCU.ValueFloat64()))
-	}
-	if !state.SuspendTimeoutSeconds.IsNull() && !state.SuspendTimeoutSeconds.IsUnknown() {
-		if cfg.Project.DefaultEndpointSettings == nil {
-			cfg.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
-		}
-		cfg.Project.DefaultEndpointSettings.SuspendTimeoutSeconds =
-			pointer(neon.SuspendTimeoutSeconds(state.SuspendTimeoutSeconds.ValueInt64()))
-	}
-
-	if state.MaintenanceWindow != nil {
-		if cfg.Project.Settings == nil {
-			cfg.Project.Settings = &neon.ProjectSettingsData{}
-		}
-		cfg.Project.Settings.MaintenanceWindow = state.maintenanceWindow(ctx, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	if !state.AllowedIPs.IsNull() && !state.AllowedIPs.IsUnknown() {
-		var allowedIps []string
-		resp.Diagnostics.Append(state.AllowedIPs.ElementsAs(ctx, &allowedIps, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-
-		if len(allowedIps) > 0 {
-			if cfg.Project.Settings == nil {
-				cfg.Project.Settings = &neon.ProjectSettingsData{}
-			}
-			if cfg.Project.Settings.AllowedIps == nil {
-				cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
-			}
-			cfg.Project.Settings.AllowedIps.Ips = allowedIps
-		}
-	}
-
-	if !state.AllowedIPsProtectedBranchesOnly.IsNull() && !state.AllowedIPsProtectedBranchesOnly.IsUnknown() {
-		if cfg.Project.Settings == nil {
-			cfg.Project.Settings = &neon.ProjectSettingsData{}
-		}
-		if cfg.Project.Settings.AllowedIps == nil {
-			cfg.Project.Settings.AllowedIps = &neon.AllowedIps{}
-		}
-		cfg.Project.Settings.AllowedIps.ProtectedBranchesOnly = state.AllowedIPsProtectedBranchesOnly.ValueBoolPointer()
-	}
-
-	// TODO: add the request config inference
-
-	var project neon.Project
-	var defaultBranch neon.Branch
-	var endpoints []neon.Endpoint
-	var databases []neon.Database
-	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
-		result, err := r.client.CreateProject(cfg)
-		if err != nil {
+func updateStateProject(d *schema.ResourceData, r neon.Project, defaultBranchID, defaultBranchName string,
+	dbConnectionInfo dbConnectionInfo, defaultBranchProtected bool) error {
+	if r.OrgID != nil {
+		if err := d.Set("org_id", *r.OrgID); err != nil {
 			return err
 		}
-		waitUnfinishedOperations(ctx, r.client, result.OperationsResponse.Operations)
-		project = result.ProjectResponse.Project
-		defaultBranch = result.BranchResponse.Branch
-		endpoints = result.EndpointsResponse.Endpoints
-		databases = result.DatabasesResponse.Databases
-		return nil
-	}, ctx)...)
-	if resp.Diagnostics.HasError() {
-		return
+	}
+	if err := d.Set("name", r.Name); err != nil {
+		return err
+	}
+	if err := d.Set("region_id", r.RegionID); err != nil {
+		return err
+	}
+	if err := d.Set("pg_version", r.PgVersion); err != nil {
+		return err
+	}
+	if err := d.Set("history_retention_seconds", r.HistoryRetentionSeconds); err != nil {
+		return err
+	}
+	if err := d.Set("compute_provisioner", string(r.Provisioner)); err != nil {
+		return err
+	}
+	if err := types.SetTristateBool(d, "store_password", &r.StorePasswords); err != nil {
+		return err
 	}
 
-	primaryComputeSettings := state.PrimaryCompute
-
-	defaultEndpoint := findDefaultEndpoint(endpoints, defaultBranch.ID)
-	defaultDatabase := findDefaultDatabase(databases, defaultBranch.ID)
-	state.inferAttr(ctx, project, defaultBranch, defaultEndpoint, defaultDatabase, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// set custom config for the primary compute
-	if primaryComputeSettings != nil && defaultEndpoint.ID != "" {
-		state.PrimaryCompute = r.updatePrimaryCompute(ctx, state.PrimaryCompute, primaryComputeSettings, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-}
-
-func (r neonProjectResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	if r.client == nil {
-		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
-		return
-	}
-
-	var state neonProjectResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	var project neon.Project
-	var defaultBranch neon.Branch
-	var defaultEndpoint neon.Endpoint
-	var defaultDatabase neon.Database
-	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
-		// read the project details
-		result, err := r.client.GetProject(state.ID.ValueString())
-		if err != nil {
-			return err
-		}
-		project = result.Project
-
-		// read the default branch details
-		var cursor *string
-		for {
-			res, err := r.client.ListProjectBranches(project.ID, nil,
-				&neon.ListProjectBranchesSortByCreatedAt, cursor, &neon.SortOrderParamAsc,
-				nil, nil)
+	if r.DefaultEndpointSettings != nil {
+		if r.DefaultEndpointSettings.AutoscalingLimitMinCu != nil {
+			err := d.Set("autoscaling_limit_min_cu", float64(*r.DefaultEndpointSettings.AutoscalingLimitMinCu))
 			if err != nil {
 				return err
 			}
-
-			if res.CursorPaginationResponse.Pagination != nil {
-				cursor = res.CursorPaginationResponse.Pagination.Next
-			} else {
-				cursor = nil
+		}
+		if r.DefaultEndpointSettings.AutoscalingLimitMaxCu != nil {
+			err := d.Set("autoscaling_limit_max_cu", float64(*r.DefaultEndpointSettings.AutoscalingLimitMaxCu))
+			if err != nil {
+				return err
 			}
+		}
+		if r.DefaultEndpointSettings.SuspendTimeoutSeconds != nil {
+			err := d.Set("suspend_timeout_seconds", int(*r.DefaultEndpointSettings.SuspendTimeoutSeconds))
+			if err != nil {
+				return err
+			}
+		}
+	}
 
-			for _, br := range res.Branches {
-				if br.Default {
-					defaultBranch = br
-					cursor = nil
-					break
+	var primaryCompute = make(map[string]interface{}, len(schemaCompute.Elem.(*schema.Resource).Schema))
+	if dbConnectionInfo.endpointID != "" {
+		primaryCompute["id"] = dbConnectionInfo.endpointID
+		primaryCompute["autoscaling_limit_min_cu"] = float64(dbConnectionInfo.defaultEndpoint.AutoscalingLimitMinCu)
+		primaryCompute["autoscaling_limit_max_cu"] = float64(dbConnectionInfo.defaultEndpoint.AutoscalingLimitMaxCu)
+		primaryCompute["suspend_timeout_seconds"] = int(dbConnectionInfo.defaultEndpoint.SuspendTimeoutSeconds)
+		var name string
+		if dbConnectionInfo.defaultEndpoint.Name != nil {
+			name = *dbConnectionInfo.defaultEndpoint.Name
+		}
+		primaryCompute["name"] = name
+		if err := d.Set("primary_compute", []interface{}{primaryCompute}); err != nil {
+			return err
+		}
+	}
+
+	if err := d.Set(
+		"branch", []interface{}{
+			map[string]interface{}{
+				"id":            defaultBranchID,
+				"name":          defaultBranchName,
+				"role_name":     dbConnectionInfo.userName,
+				"database_name": dbConnectionInfo.dbName,
+			},
+		},
+	); err != nil {
+		return err
+	}
+
+	_ = d.Set("quota", []interface{}{map[string]interface{}{}})
+
+	if r.Settings != nil {
+		if r.Settings.Quota != nil {
+			if err := d.Set(
+				"quota", []interface{}{
+					map[string]interface{}{
+						"active_time_seconds":  int(deref(r.Settings.Quota.ActiveTimeSeconds)),
+						"compute_time_seconds": int(deref(r.Settings.Quota.ComputeTimeSeconds)),
+						"written_data_bytes":   int(deref(r.Settings.Quota.WrittenDataBytes)),
+						"data_transfer_bytes":  int(deref(r.Settings.Quota.DataTransferBytes)),
+						"logical_size_bytes":   int(deref(r.Settings.Quota.LogicalSizeBytes)),
+					},
+				},
+			); err != nil {
+				return err
+			}
+		}
+
+		var allowedIPs = make([]string, 0)
+		var protectedBranchesOnly *bool
+		if r.Settings.AllowedIps.Ips != nil {
+			allowedIPs = r.Settings.AllowedIps.Ips
+			protectedBranchesOnly = r.Settings.AllowedIps.ProtectedBranchesOnly
+		}
+		if err := d.Set("allowed_ips", allowedIPs); err != nil {
+			return err
+		}
+		if _, ok := d.GetOk("allowed_ips_protected_branches_only"); ok ||
+			(protectedBranchesOnly != nil && *protectedBranchesOnly) {
+			if err := types.SetTristateBool(d, "allowed_ips_protected_branches_only", protectedBranchesOnly); err != nil {
+				return err
+			}
+		}
+		if _, ok := d.GetOk("block_public_connections"); ok ||
+			(r.Settings.BlockPublicConnections != nil && *r.Settings.BlockPublicConnections) {
+			if err := types.SetTristateBool(d, "block_public_connections", r.Settings.BlockPublicConnections); err != nil {
+				return err
+			}
+		}
+		if _, ok := d.GetOk("enable_logical_replication"); ok ||
+			(r.Settings.EnableLogicalReplication != nil && *r.Settings.EnableLogicalReplication) {
+			if err := types.SetTristateBool(d, "enable_logical_replication",
+				r.Settings.EnableLogicalReplication); err != nil {
+				return err
+			}
+		}
+
+		if _, ok := d.GetOk("block_vpc_connections"); ok ||
+			(r.Settings.BlockVpcConnections != nil && *r.Settings.BlockVpcConnections) {
+			if err := types.SetTristateBool(d, "block_vpc_connections",
+				r.Settings.BlockVpcConnections); err != nil {
+				return err
+			}
+		}
+
+		if r.Settings.Hipaa != nil {
+			switch {
+			case !*r.Settings.Hipaa && types.IsNull(d, "hipaa"):
+			default:
+				if err := types.SetTristateBool(d, "hipaa", r.Settings.Hipaa); err != nil {
+					return err
 				}
 			}
-
-			if cursor == nil {
-				break
-			}
 		}
+	}
 
-		if defaultBranch.ID == "" {
-			return nil
+	if err := d.Set("default_branch_id", defaultBranchID); err != nil {
+		return err
+	}
+
+	if err := d.Set("database_host", dbConnectionInfo.host); err != nil {
+		return err
+	}
+
+	if err := d.Set("database_host_pooler", dbConnectionInfo.poolerHost); err != nil {
+		return err
+	}
+
+	if err := d.Set("database_name", dbConnectionInfo.dbName); err != nil {
+		return err
+	}
+
+	if err := d.Set("database_user", dbConnectionInfo.userName); err != nil {
+		return err
+	}
+
+	if err := d.Set("database_password", dbConnectionInfo.pass); err != nil {
+		return err
+	}
+
+	if err := d.Set("connection_uri", dbConnectionInfo.connectionURI()); err != nil {
+		return err
+	}
+
+	if err := d.Set("connection_uri_pooler", dbConnectionInfo.poolerConnectionURI()); err != nil {
+		return err
+	}
+
+	if err := d.Set("default_endpoint_id", dbConnectionInfo.endpointID); err != nil {
+		return err
+	}
+
+	if r.Settings != nil && r.Settings.MaintenanceWindow != nil {
+		maintenanceWindow := r.Settings.MaintenanceWindow
+		if err := d.Set("maintenance_window", []map[string]interface{}{
+			{
+				"weekdays":   maintenanceWindow.Weekdays,
+				"start_time": maintenanceWindow.StartTime,
+				"end_time":   maintenanceWindow.EndTime,
+			},
+		}); err != nil {
+			return err
 		}
-
-		var errs = make(chan error, 2)
-		// read default endpoint
-		go func() {
-			resEndpoints, err := r.client.ListProjectEndpoints(project.ID)
-			if err != nil {
-				errs <- err
-				return
-			}
-			defaultEndpoint = findDefaultEndpoint(resEndpoints.Endpoints, defaultBranch.ID)
-			errs <- nil
-		}()
-
-		// read default database
-		go func() {
-			resDatabases, err := r.client.ListProjectBranchDatabases(project.ID, defaultBranch.ID)
-			if err != nil {
-				errs <- err
-				return
-			}
-			defaultDatabase = findDefaultDatabase(resDatabases.Databases, defaultBranch.ID)
-			errs <- nil
-		}()
-
-		for i := 0; i < cap(errs); i++ {
-			if e := <-errs; e != nil {
-				return e
-			}
-		}
-
-		return nil
-	}, ctx, map[int]func(context.Context) error{
-		http.StatusNotFound: func(_ context.Context) error {
-			return nil
-		},
-	})...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if project.ID == "" {
-		resp.State.RemoveResource(ctx)
-		return
 	}
 
-	state.inferAttr(ctx, project, defaultBranch, defaultEndpoint, defaultDatabase, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
+	if err := d.Set("default_branch_protected", defaultBranchProtected); err != nil {
+		return err
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
+	return nil
 }
 
-func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	if r.client == nil {
-		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
-		return
+func deref(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func resourceProjectDeleteRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return projectReadiness.RetryWithFallback(resourceProjectDelete, ctx, d, meta, map[int]FallbackFn{
+		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+			d.SetId("")
+			return nil
+		},
+		http.StatusUnprocessableEntity: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+			d.SetId("")
+			return nil
+		},
+	})
+}
+
+func resourceProjectUpdateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return projectReadiness.Retry(resourceProjectUpdate, ctx, d, meta)
+}
+
+func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+	tflog.Trace(ctx, "created Project")
+
+	var orgID *string
+	if v, ok := d.GetOk("org_id"); ok && v != "" {
+		orgID = pointer(v.(string))
 	}
 
-	var plan, prior neonProjectResourceModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &prior)...)
-	if resp.Diagnostics.HasError() {
-		return
+	projectDef := neon.ProjectCreateRequestProject{
+		OrgID:          orgID,
+		Name:           pointer(d.Get("name").(string)),
+		Provisioner:    pointer(neon.Provisioner(d.Get("compute_provisioner").(string))),
+		RegionID:       pointer(d.Get("region_id").(string)),
+		StorePasswords: types.GetTristateBool(d, "store_password"),
 	}
 
-	var cfg neon.ProjectUpdateRequest
-	if !prior.Name.Equal(plan.Name) && plan.Name.ValueString() != "" {
-		cfg.Project.Name = plan.Name.ValueStringPointer()
+	if v, ok := d.Get("history_retention_seconds").(int); ok && v >= 0 {
+		projectDef.HistoryRetentionSeconds = pointer(int32(v))
 	}
 
-	var updateMaintenanceWindow bool
-	if plan.MaintenanceWindow != nil {
-		if prior.MaintenanceWindow != nil {
-			if !plan.MaintenanceWindow.Weekdays.Equal(prior.MaintenanceWindow.Weekdays) ||
-				!plan.MaintenanceWindow.StartTime.Equal(prior.MaintenanceWindow.StartTime) ||
-				!plan.MaintenanceWindow.EndTime.Equal(prior.MaintenanceWindow.EndTime) {
-				updateMaintenanceWindow = true
+	if v, ok := d.GetOk("pg_version"); ok && v.(int) > 0 {
+		projectDef.PgVersion = pointer(neon.PgVersion(v.(int)))
+	}
+
+	if v, ok := d.GetOk("autoscaling_limit_min_cu"); ok && v.(float64) > 0 {
+		if projectDef.DefaultEndpointSettings == nil {
+			projectDef.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		projectDef.DefaultEndpointSettings.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(v.(float64)))
+	}
+
+	if v, ok := d.GetOk("autoscaling_limit_max_cu"); ok && v.(float64) > 0 {
+		if projectDef.DefaultEndpointSettings == nil {
+			projectDef.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		projectDef.DefaultEndpointSettings.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(v.(float64)))
+	}
+
+	if v, ok := d.GetOk("suspend_timeout_seconds"); ok && v.(int) > -2 {
+		if projectDef.DefaultEndpointSettings == nil {
+			projectDef.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+		}
+		projectDef.DefaultEndpointSettings.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(v.(int)))
+	}
+
+	if v, ok := d.GetOk("quota"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+		if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+			projectDef.Settings = &neon.ProjectSettingsData{
+				Quota: mapToQuotaSettings(v),
 			}
-		} else {
-			updateMaintenanceWindow = true
 		}
 	}
 
-	if updateMaintenanceWindow {
-		if cfg.Project.Settings == nil {
-			cfg.Project.Settings = &neon.ProjectSettingsData{}
+	if v, ok := d.GetOk("allowed_ips"); ok && len(v.([]interface{})) > 0 {
+		var ips = make([]string, len(v.([]interface{})))
+		for i, vv := range v.([]interface{}) {
+			ips[i] = fmt.Sprintf("%v", vv)
 		}
-		cfg.Project.Settings.MaintenanceWindow = plan.maintenanceWindow(ctx, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+
+		if projectDef.Settings == nil {
+			projectDef.Settings = &neon.ProjectSettingsData{}
+		}
+		projectDef.Settings.AllowedIps = &neon.AllowedIps{
+			Ips: ips,
+		}
+
+		projectDef.Settings.AllowedIps.ProtectedBranchesOnly = types.GetTristateBool(d,
+			"allowed_ips_protected_branches_only")
+	}
+
+	if v := types.GetTristateBool(d, "block_public_connections"); v != nil {
+		if projectDef.Settings == nil {
+			projectDef.Settings = &neon.ProjectSettingsData{}
+		}
+		projectDef.Settings.BlockPublicConnections = v
+	}
+
+	if v := types.GetTristateBool(d, "block_vpc_connections"); v != nil {
+		if projectDef.Settings == nil {
+			projectDef.Settings = &neon.ProjectSettingsData{}
+		}
+		projectDef.Settings.BlockVpcConnections = v
+	}
+
+	if v := types.GetTristateBool(d, "enable_logical_replication"); v != nil {
+		if projectDef.Settings == nil {
+			projectDef.Settings = &neon.ProjectSettingsData{}
+		}
+		projectDef.Settings.EnableLogicalReplication = v
+	}
+
+	if v := types.GetTristateBool(d, "hipaa"); v != nil {
+		if projectDef.Settings == nil {
+			projectDef.Settings = &neon.ProjectSettingsData{}
+		}
+		projectDef.Settings.Hipaa = v
+	}
+
+	if v, ok := d.GetOk("branch"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+		if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+			projectDef.Branch = mapToBranchSettings(v)
 		}
 	}
 
-	// TODO: add the request config inference
+	if v, ok := d.GetOk("maintenance_window"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+		if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+			if projectDef.Settings == nil {
+				projectDef.Settings = &neon.ProjectSettingsData{}
+			}
+			weekdaysRaw := v["weekdays"].([]interface{})
+			var weekdays = make([]int, len(weekdaysRaw))
+			for i, weekday := range weekdaysRaw {
+				weekdays[i] = weekday.(int)
+			}
+			projectDef.Settings.MaintenanceWindow = &neon.MaintenanceWindow{
+				EndTime:   v["end_time"].(string),
+				StartTime: v["start_time"].(string),
+				Weekdays:  weekdays,
+			}
+		}
+	}
 
-	resp.Diagnostics.Append(projectReadiness.RetryFramework(func(ctx context.Context) error {
-		result, err := r.client.UpdateProject(plan.ID.ValueString(), cfg)
+	client := meta.(sdkProject)
+
+	resp, err := client.CreateProject(
+		neon.ProjectCreateRequest{
+			Project: projectDef,
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+
+	projectID := resp.ProjectResponse.Project.ID
+	d.SetId(projectID)
+
+	branch := resp.BranchResponse.Branch
+	var info dbConnectionInfo
+	info, err = newDbConnectionInfo(client, projectID, branch.ID, resp.EndpointsResponse.Endpoints,
+		resp.DatabasesResponse.Databases)
+	if err != nil {
+		return err
+	}
+
+	defaultBranchProtected := d.Get("default_branch_protected").(bool)
+	// Warning: The condition shall be updated if Neon changes the default behaviour.
+	if defaultBranchProtected != branch.Protected {
+		resp, err := client.UpdateProjectBranch(projectID, branch.ID, neon.BranchUpdateRequest{
+			Branch: neon.BranchUpdateRequestBranch{
+				Protected: &defaultBranchProtected,
+			},
+		})
 		if err != nil {
 			return err
 		}
-		waitUnfinishedOperations(ctx, r.client, result.OperationsResponse.Operations)
-		return nil
-	}, ctx)...)
-	if resp.Diagnostics.HasError() {
-		return
+		waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
 	}
 
-	if plan.PrimaryCompute != nil {
-		plan.PrimaryCompute = r.updatePrimaryCompute(ctx, prior.PrimaryCompute, plan.PrimaryCompute, &resp.Diagnostics)
-		if resp.Diagnostics.HasError() {
-			return
+	if v, ok := d.GetOk("primary_compute"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+		if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+			cfg := neon.EndpointUpdateRequestEndpoint{}
+			if v, ok := v["autoscaling_limit_min_cu"].(float64); ok && v > 0 {
+				cfg.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(v))
+			}
+
+			if v, ok := v["autoscaling_limit_max_cu"].(float64); ok && v > 0 {
+				cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(v))
+			}
+
+			if v, ok := v["suspend_timeout_seconds"].(int); ok && v > -2 {
+				cfg.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(v))
+			}
+
+			if v, ok := v["name"].(string); ok && v != "" {
+				cfg.Name = &v
+			}
+
+			client := meta.(*neon.Client)
+			resp, err := client.UpdateProjectEndpoint(
+				projectID,
+				info.endpointID,
+				neon.EndpointUpdateRequest{Endpoint: cfg},
+			)
+			if err != nil {
+				return err
+			}
+			waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+			info.defaultEndpoint = resp.EndpointResponse.Endpoint
 		}
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
+	return updateStateProject(d, resp.ProjectResponse.Project, branch.ID, branch.Name, info, defaultBranchProtected)
 }
 
-func (r neonProjectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	if r.client == nil {
-		resp.Diagnostics.AddError("Client Not Configured", "The Neon provider client is not configured.")
-		return
+func resourceProjectCreateRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return projectReadiness.Retry(resourceProjectCreate, ctx, d, meta)
+}
+
+func resourceProjectUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+	tflog.Trace(ctx, "update Project")
+
+	req := neon.ProjectUpdateRequest{
+		Project: neon.ProjectUpdateRequestProject{},
 	}
 
-	var state neonProjectResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
+	if d.HasChange("name") {
+		req.Project.Name = pointer(d.Get("name").(string))
 	}
 
-	resp.Diagnostics.Append(projectReadiness.RetryWithFallbackFramework(func(ctx context.Context) error {
-		_, err := r.client.DeleteProject(state.ID.ValueString())
+	if d.HasChange("history_retention_seconds") {
+		req.Project.HistoryRetentionSeconds = pointer(int32(d.Get("history_retention_seconds").(int)))
+	}
+
+	if d.HasChange("autoscaling_limit_min_cu") {
+		if v, ok := d.GetOk("autoscaling_limit_min_cu"); ok && v.(float64) > 0 {
+			if req.Project.DefaultEndpointSettings == nil {
+				req.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+			}
+			req.Project.DefaultEndpointSettings.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(v.(float64)))
+		}
+	}
+
+	if d.HasChange("autoscaling_limit_max_cu") {
+		if v, ok := d.GetOk("autoscaling_limit_max_cu"); ok && v.(float64) > 0 {
+			if req.Project.DefaultEndpointSettings == nil {
+				req.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+			}
+			req.Project.DefaultEndpointSettings.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(v.(float64)))
+		}
+	}
+
+	if d.HasChange("suspend_timeout_seconds") {
+		if v, ok := d.GetOk("suspend_timeout_seconds"); ok && v.(int) > -2 {
+			if req.Project.DefaultEndpointSettings == nil {
+				req.Project.DefaultEndpointSettings = &neon.DefaultEndpointSettings{}
+			}
+			req.Project.DefaultEndpointSettings.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(v.(int)))
+		}
+	}
+
+	var quota *neon.ProjectQuota
+	if d.HasChange("quota") {
+		if v, ok := d.GetOk("quota"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+			if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+				quota = mapToQuotaSettings(v)
+			}
+		}
+	}
+
+	var maintenanceWindow = new(neon.MaintenanceWindow) // nolint:ineffassign
+	maintenanceWindow = nil                             // nolint:ineffassign
+	if d.HasChange("maintenance_window") {
+		if v, ok := d.GetOk("maintenance_window"); ok {
+			if len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+				if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+					weekdaysRaw := v["weekdays"].([]interface{})
+					var weekdays = make([]int, len(weekdaysRaw))
+					for i, weekday := range weekdaysRaw {
+						weekdays[i] = weekday.(int)
+					}
+					maintenanceWindow.Weekdays = weekdays
+					maintenanceWindow.StartTime = v["start_time"].(string)
+					maintenanceWindow.EndTime = v["end_time"].(string)
+				}
+			}
+		}
+	}
+
+	withLogicalReplication := types.GetTristateBool(d, "enable_logical_replication")
+	if _, ok := d.GetOk("enable_logical_replication"); !ok && d.HasChange("enable_logical_replication") {
+		withLogicalReplication = pointer(false)
+	}
+	req.Project.Settings = &neon.ProjectSettingsData{
+		Quota: quota,
+		AllowedIps: &neon.AllowedIps{
+			ProtectedBranchesOnly: types.GetTristateBool(d, "allowed_ips_protected_branches_only"),
+		},
+		BlockPublicConnections:   types.GetTristateBool(d, "block_public_connections"),
+		EnableLogicalReplication: withLogicalReplication,
+		MaintenanceWindow:        maintenanceWindow,
+		BlockVpcConnections:      types.GetTristateBool(d, "block_vpc_connections"),
+		Hipaa:                    types.GetTristateBool(d, "hipaa"),
+	}
+
+	if v, ok := d.GetOk("allowed_ips"); ok && len(v.([]interface{})) > 0 {
+		var allowedIPs = make([]string, len(v.([]interface{})))
+		for i, vv := range v.([]interface{}) {
+			allowedIPs[i] = fmt.Sprintf("%v", vv)
+		}
+		req.Project.Settings.AllowedIps.Ips = allowedIPs
+	}
+
+	client := meta.(sdkProject)
+	resp, err := client.UpdateProject(d.Id(), req)
+	if err != nil {
 		return err
-	}, ctx, map[int]func(context.Context) error{
-		http.StatusNotFound: func(_ context.Context) error { return nil },
-	})...)
-	if resp.Diagnostics.HasError() {
-		return
 	}
 
-	resp.State.RemoveResource(ctx)
+	waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+
+	if d.HasChange("default_branch_protected") {
+		defaultBranchProtected := d.Get("default_branch_protected").(bool)
+		branchID := d.Get("default_branch_id").(string)
+		resp, err := client.UpdateProjectBranch(d.Id(), branchID, neon.BranchUpdateRequest{
+			Branch: neon.BranchUpdateRequestBranch{
+				Protected: &defaultBranchProtected,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+	}
+
+	if d.HasChange("primary_compute") {
+		if v, ok := d.GetOk("primary_compute"); ok && len(v.([]interface{})) > 0 && v.([]interface{})[0] != nil {
+			if v, ok := v.([]interface{})[0].(map[string]interface{}); ok && len(v) > 0 {
+				cfg := neon.EndpointUpdateRequestEndpoint{}
+				if v, ok := v["autoscaling_limit_min_cu"].(float64); ok && v > 0 {
+					cfg.AutoscalingLimitMinCu = pointer(neon.ComputeUnit(v))
+				}
+
+				if v, ok := v["autoscaling_limit_max_cu"].(float64); ok && v > 0 {
+					cfg.AutoscalingLimitMaxCu = pointer(neon.ComputeUnit(v))
+				}
+
+				if v, ok := v["suspend_timeout_seconds"].(int); ok && v > -2 {
+					cfg.SuspendTimeoutSeconds = pointer(neon.SuspendTimeoutSeconds(v))
+				}
+				if v, ok := v["name"].(string); ok && v != "" {
+					cfg.Name = &v
+				}
+
+				client := meta.(*neon.Client)
+				resp, err := client.UpdateProjectEndpoint(
+					d.Id(),
+					v["id"].(string),
+					neon.EndpointUpdateRequest{Endpoint: cfg},
+				)
+				if err != nil {
+					return err
+				}
+				waitUnfinishedOperations(ctx, client, resp.OperationsResponse.Operations)
+			}
+		}
+	}
+
+	return resourceProjectRead(ctx, d, meta)
 }
 
-func (r neonProjectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	state := neonProjectResourceModel{
-		ID: types.StringValue(req.ID),
-		// init to respect the tf types
-		AllowedIPs: types.ListNull(types.StringType),
-		// init to respect the tf types
-		EnabledLibraries: types.ListNull(types.StringType),
+func resourceProjectRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+	tflog.Trace(ctx, "get Project")
+	client := meta.(sdkProject)
+
+	resp, err := client.GetProject(d.Id())
+	if err != nil {
+		return err
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
+
+	project := resp.Project
+
+	branches, err := client.ListProjectBranches(d.Id(), nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		return err
 	}
-	readResp := resource.ReadResponse{State: resp.State}
-	r.Read(ctx, resource.ReadRequest{State: resp.State}, &readResp)
-	resp.Diagnostics.Append(readResp.Diagnostics...)
-	if resp.Diagnostics.HasError() {
-		return
+
+	var branchMain neon.Branch
+	for _, v := range branches.Branches {
+		if v.Default {
+			branchMain = v
+			break
+		}
 	}
-	if resp.State.Raw.IsNull() {
-		resp.Diagnostics.AddError("project not found", "")
+
+	if branchMain.ID == "" {
+		return updateStateProject(d, project, branchMain.ID, branchMain.Name, dbConnectionInfo{}, branchMain.Protected)
 	}
+
+	endpoints, err := client.ListProjectBranchEndpoints(d.Id(), branchMain.ID)
+	if err != nil {
+		return err
+	}
+
+	dbs, err := client.ListProjectBranchDatabases(d.Id(), branchMain.ID)
+	if err != nil {
+		return err
+	}
+
+	info, err := newDbConnectionInfo(client, project.ID, branchMain.ID, endpoints.Endpoints, dbs.Databases)
+	if err != nil {
+		return err
+	}
+
+	return updateStateProject(d, project, branchMain.ID, branchMain.Name, info, branchMain.Protected)
 }
 
-func (r neonProjectResource) updatePrimaryCompute(ctx context.Context, prior *neonEndpointResourceModel,
-	plan *neonEndpointResourceModel, diagnostics *diag.Diagnostics) *neonEndpointResourceModel {
-	schemaResp := resource.SchemaResponse{}
-	r.endpointHandler.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
-	diagnostics.Append(schemaResp.Diagnostics...)
-	if diagnostics.HasError() {
-		return nil
+func resourceProjectReadRetry(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	return projectReadiness.RetryWithFallback(resourceProjectRead, ctx, d, meta, map[int]FallbackFn{
+		http.StatusNotFound: func(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+			tflog.Debug(ctx, "project not found, deleting from the state",
+				map[string]interface{}{"id": d.Id()})
+			d.SetId("")
+			return nil
+		}})
+}
+
+func resourceProjectDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
+	tflog.Trace(ctx, "delete Project")
+
+	if _, err := meta.(sdkProject).DeleteProject(d.Id()); err != nil {
+		return err
 	}
 
-	updateReq := resource.UpdateRequest{
-		State: tfsdk.State{Schema: schemaResp.Schema},
-		Plan:  tfsdk.Plan{Schema: schemaResp.Schema},
-	}
-	diagnostics.Append(updateReq.State.Set(ctx, prior)...)
-	diagnostics.Append(updateReq.Plan.Set(ctx, plan)...)
-	if diagnostics.HasError() {
-		return nil
-	}
+	d.SetId("")
+	return updateStateProject(d, neon.Project{}, "", "", dbConnectionInfo{},
+		false)
+}
 
-	updateResp := resource.UpdateResponse{State: updateReq.State}
-	r.endpointHandler.Update(ctx, updateReq, &updateResp)
-	diagnostics.Append(updateResp.Diagnostics...)
-	if diagnostics.HasError() {
-		return nil
+func resourceProjectImport(ctx context.Context, d *schema.ResourceData, meta interface{}) (
+	[]*schema.ResourceData, error,
+) {
+	if diags := projectReadiness.Retry(resourceProjectRead, ctx, d, meta); diags.HasError() {
+		return nil, errors.New(diags[0].Summary)
 	}
+	return []*schema.ResourceData{d}, nil
+}
 
-	var newState = new(neonEndpointResourceModel)
-	diagnostics.Append(updateResp.State.Get(ctx, newState)...)
-	if diagnostics.HasError() {
-		return nil
-	}
-	return newState
+type sdkProject interface {
+	GetProjectBranchRolePassword(string, string, string) (neon.RolePasswordResponse, error)
+	CreateProject(neon.ProjectCreateRequest) (neon.CreatedProject, error)
+	UpdateProject(string, neon.ProjectUpdateRequest) (neon.UpdateProjectRespObj, error)
+	GetProject(string) (neon.ProjectResponse, error)
+	ListProjectBranches(string, *string, *neon.ListProjectBranchesSortBy, *string, *neon.SortOrderParam, *uint16,
+		*bool) (neon.ListProjectBranchesRespObj, error)
+	ListProjectBranchEndpoints(string, string) (neon.EndpointsResponse, error)
+	DeleteProject(string) (neon.ProjectResponse, error)
+	ListProjectBranchDatabases(string, string) (neon.DatabasesResponse, error)
+	GrantPermissionToProject(projectID string, cfg neon.GrantPermissionToProjectRequest) (neon.ProjectPermission, error)
+	RevokePermissionFromProject(projectID string, permissionID string) (neon.ProjectPermission, error)
+	ListProjectPermissions(projectID string) (neon.ProjectPermissions, error)
+	UpdateProjectBranch(projectID string, branchID string, cfg neon.BranchUpdateRequest) (neon.BranchOperations, error)
+	opsReader
 }

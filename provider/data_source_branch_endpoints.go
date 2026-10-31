@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -130,7 +129,6 @@ func (d *neonBranchEndpointsDataSource) Configure(_ context.Context, req datasou
 	d.client = adapter.sdk
 }
 
-// TODO: reuse the Read method of the resource neonEndpointResource.
 func (d *neonBranchEndpointsDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	if d.client == nil {
 		resp.Diagnostics.AddError("SDK is not configured", "The Neon provider client is unavailable.")
@@ -160,10 +158,9 @@ func (d *neonBranchEndpointsDataSource) Read(ctx context.Context, req datasource
 			name = *endpoint.Name
 		}
 		endpoints = append(endpoints, branchEndpointModel{
-			ID:   types.StringValue(endpoint.ID),
-			Host: types.StringValue(endpoint.Host),
-			HostPooling: types.StringValue(endpoint.ID + "-pooler" +
-				strings.TrimPrefix(endpoint.Host, endpoint.ID)),
+			ID:                    types.StringValue(endpoint.ID),
+			Host:                  types.StringValue(endpoint.Host),
+			HostPooling:           types.StringValue(newPooledHost(endpoint.Host)),
 			Type:                  types.StringValue(endpoint.Type.String()),
 			RegionID:              types.StringValue(endpoint.RegionID),
 			ProxyHost:             types.StringValue(endpoint.ProxyHost),
