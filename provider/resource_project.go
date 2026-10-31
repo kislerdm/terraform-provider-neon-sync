@@ -412,16 +412,21 @@ func (r *neonProjectResource) ModifyPlan(ctx context.Context, req resource.Modif
 		return
 	}
 
-	attrPath := path.Root("allowed_ips_protected_branches_only")
-	var config, state types.Bool
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, attrPath, &config)...)
-	resp.Diagnostics.Append(req.State.GetAttribute(ctx, attrPath, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	if config.IsNull() && !state.IsNull() && !state.IsUnknown() && state.ValueBool() {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, attrPath, types.BoolValue(false))...)
+	// set omitted values to false
+	for _, pAttr := range []string{
+		"allowed_ips_protected_branches_only",
+		"enable_logical_replication",
+	} {
+		attrPath := path.Root(pAttr)
+		var config, state types.Bool
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, attrPath, &config)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, attrPath, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if config.IsNull() && !state.IsNull() && !state.IsUnknown() && state.ValueBool() {
+			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, attrPath, types.BoolValue(false))...)
+		}
 	}
 }
 
@@ -740,6 +745,12 @@ func (r neonProjectResource) Create(ctx context.Context, req resource.CreateRequ
 		cfg.Project.DefaultEndpointSettings.SuspendTimeoutSeconds =
 			pointer(neon.SuspendTimeoutSeconds(state.SuspendTimeoutSeconds.ValueInt64()))
 	}
+	if !state.EnableLogicalReplication.IsUnknown() && !state.EnableLogicalReplication.IsNull() {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		cfg.Project.Settings.EnableLogicalReplication = state.EnableLogicalReplication.ValueBoolPointer()
+	}
 
 	if state.MaintenanceWindow != nil {
 		if cfg.Project.Settings == nil {
@@ -956,6 +967,13 @@ func (r neonProjectResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	if !plan.HistoryRetentionSeconds.Equal(prior.HistoryRetentionSeconds) {
 		cfg.Project.HistoryRetentionSeconds = plan.HistoryRetentionSeconds.ValueInt32Pointer()
+	}
+	if !plan.EnableLogicalReplication.IsUnknown() &&
+		!plan.EnableLogicalReplication.Equal(prior.EnableLogicalReplication) {
+		if cfg.Project.Settings == nil {
+			cfg.Project.Settings = &neon.ProjectSettingsData{}
+		}
+		cfg.Project.Settings.EnableLogicalReplication = plan.EnableLogicalReplication.ValueBoolPointer()
 	}
 
 	var updateMaintenanceWindow bool

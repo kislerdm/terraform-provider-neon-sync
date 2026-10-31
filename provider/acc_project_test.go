@@ -508,6 +508,45 @@ func TestProject(t *testing.T) {
 			})
 	})
 
+	t.Run("shall create a project w/ custom enable_logical_replication and update it", func(t *testing.T) {
+		projectName := newProjectName(projectNamePrefix)
+		resource.Test(
+			t, resource.TestCase{
+				ProtoV6ProviderFactories: newProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name   = %q
+							enable_logical_replication = true
+						}`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "enable_logical_replication", "true"),
+							verify,
+						),
+					},
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name   = %q
+							enable_logical_replication = false
+						}`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "enable_logical_replication", "false"),
+							verify,
+						),
+					},
+					{
+						Config: fmt.Sprintf(`resource "neon_project" "this" {
+							name   = %q
+						}`, projectName),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr("neon_project.this", "enable_logical_replication", "false"),
+							verify,
+						),
+					},
+				},
+			})
+	})
+
 	var config = func(projectName string, customCfg string) string {
 		return fmt.Sprintf(`resource "neon_project" "this" {
 		name = %q
