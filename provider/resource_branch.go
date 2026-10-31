@@ -9,11 +9,11 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	schemaTFSDK "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	typesTFSDK "github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
@@ -26,34 +26,34 @@ type neonBranchResource struct {
 }
 
 type neonBranchResourceModel struct {
-	ID              typesTFSDK.String `tfsdk:"id"`
-	ProjectID       typesTFSDK.String `tfsdk:"project_id"`
-	Name            typesTFSDK.String `tfsdk:"name"`
-	ParentID        typesTFSDK.String `tfsdk:"parent_id"`
-	ParentLsn       typesTFSDK.String `tfsdk:"parent_lsn"`
-	ParentTimestamp typesTFSDK.Int64  `tfsdk:"parent_timestamp"`
-	LogicalSize     typesTFSDK.Int64  `tfsdk:"logical_size"`
-	Protected       typesTFSDK.Bool   `tfsdk:"protected"`
-	Primary         typesTFSDK.Bool   `tfsdk:"primary"`
-	Default         typesTFSDK.Bool   `tfsdk:"default"`
+	ID              types.String `tfsdk:"id"`
+	ProjectID       types.String `tfsdk:"project_id"`
+	Name            types.String `tfsdk:"name"`
+	ParentID        types.String `tfsdk:"parent_id"`
+	ParentLsn       types.String `tfsdk:"parent_lsn"`
+	ParentTimestamp types.Int64  `tfsdk:"parent_timestamp"`
+	LogicalSize     types.Int64  `tfsdk:"logical_size"`
+	Protected       types.Bool   `tfsdk:"protected"`
+	Primary         types.Bool   `tfsdk:"primary"`
+	Default         types.Bool   `tfsdk:"default"`
 	// TODO: add annotations as map[string]any
 }
 
 func (v *neonBranchResourceModel) inferAttr(branch neon.Branch) {
-	v.ID = typesTFSDK.StringValue(branch.ID)
-	v.ProjectID = typesTFSDK.StringValue(branch.ProjectID)
-	v.Name = typesTFSDK.StringValue(branch.Name)
-	v.ParentID = typesTFSDK.StringPointerValue(branch.ParentID)
-	v.ParentLsn = typesTFSDK.StringPointerValue(branch.ParentLsn)
+	v.ID = types.StringValue(branch.ID)
+	v.ProjectID = types.StringValue(branch.ProjectID)
+	v.Name = types.StringValue(branch.Name)
+	v.ParentID = types.StringPointerValue(branch.ParentID)
+	v.ParentLsn = types.StringPointerValue(branch.ParentLsn)
 	var parentTimestamp int64
 	if branch.ParentTimestamp != nil {
 		parentTimestamp = branch.ParentTimestamp.Unix()
 	}
-	v.ParentTimestamp = typesTFSDK.Int64Value(parentTimestamp)
-	v.Protected = typesTFSDK.BoolValue(branch.Protected)
-	v.LogicalSize = typesTFSDK.Int64PointerValue(branch.LogicalSize)
-	v.Primary = typesTFSDK.BoolPointerValue(branch.Primary)
-	v.Default = typesTFSDK.BoolValue(branch.Default)
+	v.ParentTimestamp = types.Int64Value(parentTimestamp)
+	v.Protected = types.BoolValue(branch.Protected)
+	v.LogicalSize = types.Int64PointerValue(branch.LogicalSize)
+	v.Primary = types.BoolPointerValue(branch.Primary)
+	v.Default = types.BoolValue(branch.Default)
 }
 
 func NewNeonBranchResource() resource.Resource {
@@ -65,56 +65,54 @@ func (r *neonBranchResource) Metadata(_ context.Context, _ resource.MetadataRequ
 }
 
 func (r *neonBranchResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	requiresReplace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
-
-	resp.Schema = schemaTFSDK.Schema{
+	resp.Schema = schema.Schema{
 		Description: "Project Branch. See details: https://neon.tech/docs/introduction/branching/",
-		Attributes: map[string]schemaTFSDK.Attribute{
-			"id": schemaTFSDK.StringAttribute{
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
 				Computed:    true,
 				Description: "Branch ID.",
 			},
-			"project_id": schemaTFSDK.StringAttribute{
+			"project_id": schema.StringAttribute{
 				Required:      true,
-				PlanModifiers: requiresReplace,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Description:   "Project ID.",
 			},
-			"name": schemaTFSDK.StringAttribute{
+			"name": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Branch name.",
 			},
-			"parent_id": schemaTFSDK.StringAttribute{
+			"parent_id": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Parent branch ID.",
 			},
-			"parent_lsn": schemaTFSDK.StringAttribute{
+			"parent_lsn": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Parent branch Log Sequence Number (LSN).",
 			},
-			"parent_timestamp": schemaTFSDK.Int64Attribute{
+			"parent_timestamp": schema.Int64Attribute{
 				Optional:    true,
 				Computed:    true,
 				Validators:  []validator.Int64{notNegativeInt64},
 				Description: "Parent branch point-in-time timestamp in Unix seconds. Zero when not provided by the API.",
 			},
-			"logical_size": schemaTFSDK.Int64Attribute{
+			"logical_size": schema.Int64Attribute{
 				Computed:    true,
 				Description: "Branch logical size in bytes.",
 			},
-			"protected": schemaTFSDK.BoolAttribute{
+			"protected": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Protected branch flag.",
 			},
-			"primary": schemaTFSDK.BoolAttribute{
+			"primary": schema.BoolAttribute{
 				Computed:           true,
 				Description:        "Primary branch flag.",
 				DeprecationMessage: "Use default instead.",
 			},
-			"default": schemaTFSDK.BoolAttribute{
+			"default": schema.BoolAttribute{
 				Computed:    true,
 				Description: "Default branch flag.",
 			},
